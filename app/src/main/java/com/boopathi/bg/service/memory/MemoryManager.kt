@@ -12,6 +12,8 @@ interface MemoryManager {
     suspend fun updateOwnerProfile(profile: OwnerProfile)
     suspend fun logInteraction(userSpeech: String, bgResponse: String)
     fun getConversationFlow(): StateFlow<List<ChatMessage>>
+    suspend fun getRecentContext(maxTurns: Int = 5): List<ChatMessage>
+    suspend fun clearHistory()
 }
 
 class InMemoryMemoryManager(
@@ -34,5 +36,18 @@ class InMemoryMemoryManager(
     }
 
     override fun getConversationFlow(): StateFlow<List<ChatMessage>> = messages
-}
 
+    override suspend fun getRecentContext(maxTurns: Int): List<ChatMessage> {
+        val currentList = _messages.value
+        val maxMessages = maxTurns * 2
+        return if (currentList.size <= maxMessages) {
+            currentList
+        } else {
+            currentList.takeLast(maxMessages)
+        }
+    }
+
+    override suspend fun clearHistory() {
+        _messages.value = emptyList()
+    }
+}

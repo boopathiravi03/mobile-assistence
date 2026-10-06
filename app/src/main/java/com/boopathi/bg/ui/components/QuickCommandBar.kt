@@ -28,11 +28,14 @@ fun QuickCommandBar(
     modifier: Modifier = Modifier
 ) {
     val quickCommands = listOf(
-        "Hey BG",
-        "Hi BG",
+        "Explain artificial intelligence in simple words.",
+        "What is Kotlin?",
+        "Who created it?",
+        "Give me a project idea for an IT student.",
+        "Tell me a joke.",
+        "Android pathi simple-ah explain pannu.",
         "Who are you?",
-        "What time is it?",
-        "How are you?"
+        "What time is it?"
     )
 
     LazyRow(
@@ -59,4 +62,3 @@ fun QuickCommandBar(
         }
     }
 }
-

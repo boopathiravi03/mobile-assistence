@@ -55,7 +55,6 @@ class LocalFallbackProviderTest {
     fun testUnhandledCommand() = runBlocking {
         val result = provider.processCommand("Open the spaceship door", testOwner)
         assertFalse(result.isSuccess)
-        assertEquals("I'm not sure how to do that yet, Boopathi.", result.textResponse)
+        assertEquals("I'm having trouble connecting to my AI service right now.", result.textResponse)
     }
 }
-

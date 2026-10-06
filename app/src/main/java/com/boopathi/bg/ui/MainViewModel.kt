@@ -37,7 +37,7 @@ class MainViewModel : ViewModel() {
     private val _errorMessage = MutableStateFlow<String?>(null)
     val errorMessage: StateFlow<String?> = _errorMessage.asStateFlow()
 
-    val providerStatus: String = commandProcessor.getActiveProviderStatus()
+    val providerStatus: String = "● " + commandProcessor.getActiveProviderBadge()
 
     fun initVoiceManager(context: Context) {
         if (voiceManager == null) {

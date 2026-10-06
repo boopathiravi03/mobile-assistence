@@ -54,6 +54,10 @@ android {
         jvmToolchain(21)
     }
 
+    testOptions {
+        unitTests.isReturnDefaultValues = true
+    }
+
     buildFeatures {
         compose = true
         buildConfig = true

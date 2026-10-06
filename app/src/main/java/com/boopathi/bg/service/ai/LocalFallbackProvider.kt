@@ -1,5 +1,6 @@
 package com.boopathi.bg.service.ai
 
+import com.boopathi.bg.data.model.ChatMessage
 import com.boopathi.bg.data.model.CommandResult
 import com.boopathi.bg.data.model.OwnerProfile
 import java.text.SimpleDateFormat
@@ -19,7 +20,11 @@ class LocalFallbackProvider : AIProvider {
                 isSmallTalk(normalized)
     }
 
-    override suspend fun processCommand(prompt: String, owner: OwnerProfile): CommandResult {
+    override suspend fun processCommand(
+        prompt: String,
+        owner: OwnerProfile,
+        conversationHistory: List<ChatMessage>
+    ): CommandResult {
         val normalized = normalize(prompt)
 
         return when {
@@ -56,7 +61,7 @@ class LocalFallbackProvider : AIProvider {
             }
             else -> {
                 CommandResult(
-                    textResponse = "I'm not sure how to do that yet, ${owner.name}.",
+                    textResponse = "I'm having trouble connecting to my AI service right now.",
                     providerName = name,
                     isSuccess = false
                 )
@@ -108,4 +113,3 @@ class LocalFallbackProvider : AIProvider {
         )
     }
 }
-

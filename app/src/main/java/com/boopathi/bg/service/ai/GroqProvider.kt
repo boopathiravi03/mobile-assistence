@@ -2,8 +2,10 @@ package com.boopathi.bg.service.ai
 
 import android.util.Log
 import com.boopathi.bg.BuildConfig
+import com.boopathi.bg.data.model.ChatMessage
 import com.boopathi.bg.data.model.CommandResult
 import com.boopathi.bg.data.model.OwnerProfile
+import com.boopathi.bg.data.model.Sender
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
@@ -18,7 +20,7 @@ class GroqProvider(
     private val apiKey: String = BuildConfig.GROQ_API_KEY
 ) : AIProvider {
 
-    override val name: String = "Groq API (Fallback)"
+    override val name: String = "Groq"
     override val isAvailable: Boolean = apiKey.isNotBlank()
 
     private val client = OkHttpClient.Builder()
@@ -26,7 +28,11 @@ class GroqProvider(
         .readTimeout(15, TimeUnit.SECONDS)
         .build()
 
-    override suspend fun processCommand(prompt: String, owner: OwnerProfile): CommandResult {
+    override suspend fun processCommand(
+        prompt: String,
+        owner: OwnerProfile,
+        conversationHistory: List<ChatMessage>
+    ): CommandResult {
         if (!isAvailable) {
             return CommandResult(
                 textResponse = "Groq API key is not configured.",
@@ -46,10 +52,20 @@ class GroqProvider(
                             put("role", "system")
                             put(
                                 "content",
-                                "You are BG, a personal AI mobile agent for ${owner.name}. " +
+                                "You are BG, the personal AI mobile assistant for ${owner.name}. " +
                                         "Keep answers brief, conversational, and direct."
                             )
                         })
+
+                        // Append recent conversation history
+                        for (msg in conversationHistory) {
+                            val role = if (msg.sender == Sender.USER) "user" else "assistant"
+                            put(JSONObject().apply {
+                                put("role", role)
+                                put("content", msg.text)
+                            })
+                        }
+
                         put(JSONObject().apply {
                             put("role", "user")
                             put("content", prompt)
@@ -70,9 +86,8 @@ class GroqProvider(
                     val responseBody = response.body?.string() ?: ""
 
                     if (!response.isSuccessful) {
-                        Log.w("GroqProvider", "API response error: HTTP ${response.code}")
                         return@withContext CommandResult(
-                            textResponse = "Groq API returned an error (HTTP ${response.code}).",
+                            textResponse = "I'm having trouble connecting to my AI service right now.",
                             providerName = name,
                             isSuccess = false
                         )
@@ -94,7 +109,7 @@ class GroqProvider(
                     }
 
                     CommandResult(
-                        textResponse = "Received empty response from Groq.",
+                        textResponse = "I'm having trouble connecting to my AI service right now.",
                         providerName = name,
                         isSuccess = false
                     )
@@ -102,7 +117,7 @@ class GroqProvider(
             } catch (e: Exception) {
                 Log.w("GroqProvider", "Failed to call Groq API: ${e.message}")
                 CommandResult(
-                    textResponse = "Could not reach Groq due to network failure.",
+                    textResponse = "I'm having trouble connecting to my AI service right now.",
                     providerName = name,
                     isSuccess = false
                 )
@@ -110,4 +125,3 @@ class GroqProvider(
         }
     }
 }
-
