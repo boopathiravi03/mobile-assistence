@@ -10,6 +10,7 @@ interface AIProvider {
     suspend fun processCommand(
         prompt: String,
         owner: OwnerProfile,
-        conversationHistory: List<ChatMessage> = emptyList()
+        conversationHistory: List<ChatMessage> = emptyList(),
+        relevantMemories: List<com.boopathi.bg.data.local.entity.MemoryEntity> = emptyList()
     ): CommandResult
 }

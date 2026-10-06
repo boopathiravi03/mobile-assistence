@@ -78,7 +78,8 @@ class Phase2AIntegrationTest {
             override suspend fun processCommand(
                 prompt: String,
                 owner: OwnerProfile,
-                conversationHistory: List<ChatMessage>
+                conversationHistory: List<ChatMessage>,
+                relevantMemories: List<com.boopathi.bg.data.local.entity.MemoryEntity>
             ): CommandResult {
                 receivedHistorySize = conversationHistory.size
                 receivedPrompt = prompt

@@ -23,7 +23,8 @@ class LocalFallbackProvider : AIProvider {
     override suspend fun processCommand(
         prompt: String,
         owner: OwnerProfile,
-        conversationHistory: List<ChatMessage>
+        conversationHistory: List<ChatMessage>,
+        relevantMemories: List<com.boopathi.bg.data.local.entity.MemoryEntity>
     ): CommandResult {
         val normalized = normalize(prompt)
 

@@ -28,13 +28,17 @@ fun QuickCommandBar(
     modifier: Modifier = Modifier
 ) {
     val quickCommands = listOf(
+        "Remember that my favorite programming language is Kotlin.",
+        "What is my favorite programming language?",
+        "Remember that my project is called BG.",
+        "What do you remember about me?",
+        "Note that I need to complete my DBMS assignment.",
+        "What are my notes?",
+        "Remind me to study DBMS.",
+        "What tasks do I have?",
+        "Mark DBMS study as complete.",
+        "Forget that my favorite language is Kotlin.",
         "Explain artificial intelligence in simple words.",
-        "What is Kotlin?",
-        "Who created it?",
-        "Give me a project idea for an IT student.",
-        "Tell me a joke.",
-        "Android pathi simple-ah explain pannu.",
-        "Who are you?",
         "What time is it?"
     )
 

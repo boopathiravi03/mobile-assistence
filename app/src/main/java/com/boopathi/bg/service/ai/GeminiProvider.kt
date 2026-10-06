@@ -53,7 +53,8 @@ class GeminiProvider(
     override suspend fun processCommand(
         prompt: String,
         owner: OwnerProfile,
-        conversationHistory: List<ChatMessage>
+        conversationHistory: List<ChatMessage>,
+        relevantMemories: List<com.boopathi.bg.data.local.entity.MemoryEntity>
     ): CommandResult {
         if (!isAvailable) {
             Log.d(TAG, "Gemini API key is not configured.")
@@ -71,7 +72,7 @@ class GeminiProvider(
                 var lastErrorMessage: String? = null
 
                 for (model in candidateModels) {
-                    val result = executeGenerateContent(model, prompt, conversationHistory)
+                    val result = executeGenerateContent(model, prompt, owner, conversationHistory, relevantMemories)
                     if (result != null) {
                         val duration = System.currentTimeMillis() - startTime
                         Log.d(TAG, "Gemini ($model) responded in ${duration}ms")
@@ -102,16 +103,25 @@ class GeminiProvider(
     private fun executeGenerateContent(
         model: String,
         prompt: String,
-        conversationHistory: List<ChatMessage>
+        owner: OwnerProfile,
+        conversationHistory: List<ChatMessage>,
+        relevantMemories: List<com.boopathi.bg.data.local.entity.MemoryEntity>
     ): String? {
         val url = "https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent?key=$apiKey"
+
+        val systemText = if (relevantMemories.isNotEmpty()) {
+            BG_SYSTEM_PERSONA + "\n\nRelevant memories about ${owner.name}:\n" +
+                relevantMemories.joinToString("\n") { "- ${it.title}: ${it.content}" }
+        } else {
+            BG_SYSTEM_PERSONA
+        }
 
         val payload = JSONObject().apply {
             // 1. System instructions
             put("systemInstruction", JSONObject().apply {
                 put("parts", JSONArray().apply {
                     put(JSONObject().apply {
-                        put("text", BG_SYSTEM_PERSONA)
+                        put("text", systemText)
                     })
                 })
             })

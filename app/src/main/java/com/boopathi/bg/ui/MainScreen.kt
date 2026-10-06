@@ -42,6 +42,22 @@ fun MainScreen(
     val messages by viewModel.messages.collectAsState()
     val hasMicPermission by viewModel.hasMicPermission.collectAsState()
     val errorMessage by viewModel.errorMessage.collectAsState()
+    val showProfileDialog by viewModel.showProfileDialog.collectAsState()
+    val ownerProfile by viewModel.ownerProfile.collectAsState()
+    val memoryCount by viewModel.memoryCount.collectAsState()
+    val noteCount by viewModel.noteCount.collectAsState()
+    val taskCount by viewModel.taskCount.collectAsState()
+
+    if (showProfileDialog) {
+        com.boopathi.bg.ui.components.OwnerProfileDialog(
+            profile = ownerProfile,
+            memoryCount = memoryCount,
+            noteCount = noteCount,
+            taskCount = taskCount,
+            onLanguageSelected = { lang -> viewModel.updateLanguage(lang) },
+            onDismiss = { viewModel.closeProfile() }
+        )
+    }
 
     Box(
         modifier = Modifier
@@ -57,7 +73,8 @@ fun MainScreen(
             AssistantStatusBar(
                 providerStatus = viewModel.providerStatus,
                 hasMicPermission = hasMicPermission,
-                errorMessage = errorMessage
+                errorMessage = errorMessage,
+                onProfileClick = { viewModel.openProfile() }
             )
 
             // Conversation Messages Area

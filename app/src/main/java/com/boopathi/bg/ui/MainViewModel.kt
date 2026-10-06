@@ -1,24 +1,34 @@
 package com.boopathi.bg.ui
 
+import android.app.Application
 import android.content.Context
-import androidx.lifecycle.ViewModel
+import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.boopathi.bg.data.local.BGDatabase
+import com.boopathi.bg.data.local.entity.MemoryEntity
 import com.boopathi.bg.data.model.AssistantState
 import com.boopathi.bg.data.model.ChatMessage
+import com.boopathi.bg.data.model.OwnerProfile
+import com.boopathi.bg.data.repository.RoomBGRepository
 import com.boopathi.bg.service.command.CommandProcessor
-import com.boopathi.bg.service.memory.InMemoryMemoryManager
 import com.boopathi.bg.service.memory.MemoryManager
+import com.boopathi.bg.service.memory.RoomMemoryManager
 import com.boopathi.bg.service.voice.VoiceManager
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
-class MainViewModel : ViewModel() {
+class MainViewModel @JvmOverloads constructor(
+    application: Application,
+    customMemoryManager: MemoryManager? = null
+) : AndroidViewModel(application) {
 
-    private val memoryManager: MemoryManager = InMemoryMemoryManager()
+    // Dependency injection / Clean architecture
+    val memoryManager: MemoryManager = customMemoryManager ?: RoomMemoryManager(
+        repository = RoomBGRepository(BGDatabase.getInstance(application)),
+        scope = viewModelScope
+    )
     private val commandProcessor: CommandProcessor = CommandProcessor(memoryManager)
 
     private var voiceManager: VoiceManager? = null
@@ -37,7 +47,55 @@ class MainViewModel : ViewModel() {
     private val _errorMessage = MutableStateFlow<String?>(null)
     val errorMessage: StateFlow<String?> = _errorMessage.asStateFlow()
 
+    // Owner Profile & Memory Inspection State
+    private val _ownerProfile = MutableStateFlow(OwnerProfile())
+    val ownerProfile: StateFlow<OwnerProfile> = _ownerProfile.asStateFlow()
+
+    private val _showProfileDialog = MutableStateFlow(false)
+    val showProfileDialog: StateFlow<Boolean> = _showProfileDialog.asStateFlow()
+
+    private val _memoryCount = MutableStateFlow(0)
+    val memoryCount: StateFlow<Int> = _memoryCount.asStateFlow()
+
+    private val _noteCount = MutableStateFlow(0)
+    val noteCount: StateFlow<Int> = _noteCount.asStateFlow()
+
+    private val _taskCount = MutableStateFlow(0)
+    val taskCount: StateFlow<Int> = _taskCount.asStateFlow()
+
     val providerStatus: String = "● " + commandProcessor.getActiveProviderBadge()
+
+    init {
+        refreshProfileAndStats()
+    }
+
+    fun refreshProfileAndStats() {
+        viewModelScope.launch {
+            _ownerProfile.value = memoryManager.getOwnerProfile()
+            val allMemories = memoryManager.getMemories()
+            _memoryCount.value = allMemories.filter { it.type != MemoryEntity.TYPE_NOTE }.size
+            _noteCount.value = allMemories.filter { it.type == MemoryEntity.TYPE_NOTE }.size
+            _taskCount.value = memoryManager.getTasks(completed = false).size
+        }
+    }
+
+    fun openProfile() {
+        refreshProfileAndStats()
+        _showProfileDialog.value = true
+    }
+
+    fun closeProfile() {
+        _showProfileDialog.value = false
+    }
+
+    fun updateLanguage(langCode: String) {
+        viewModelScope.launch {
+            val current = _ownerProfile.value
+            val updated = current.copy(preferredLanguage = langCode)
+            memoryManager.updateOwnerProfile(updated)
+            _ownerProfile.value = updated
+        }
+    }
 
     fun initVoiceManager(context: Context) {
         if (voiceManager == null) {
@@ -49,22 +107,21 @@ class MainViewModel : ViewModel() {
             voiceManager = vm
 
             // Collect internal voice manager flows
-            viewModelScope.launchWhenCreatedCompat {
-                vm.assistantState.collect { _assistantState.value = it }
+            viewModelScope.launch {
+                vm.assistantState.collect {
+                    _assistantState.value = it
+                    if (it == AssistantState.IDLE) {
+                        refreshProfileAndStats()
+                    }
+                }
             }
-            viewModelScope.launchWhenCreatedCompat {
+            viewModelScope.launch {
                 vm.audioRmsDb.collect { _audioRmsDb.value = it }
             }
-            viewModelScope.launchWhenCreatedCompat {
+            viewModelScope.launch {
                 vm.errorMessage.collect { _errorMessage.value = it }
             }
         }
-    }
-
-    private fun kotlinx.coroutines.CoroutineScope.launchWhenCreatedCompat(
-        block: suspend kotlinx.coroutines.CoroutineScope.() -> Unit
-    ) {
-        this.launch(block = block)
     }
 
     fun onMicPermissionResult(isGranted: Boolean) {
@@ -95,6 +152,10 @@ class MainViewModel : ViewModel() {
     fun executeCommand(commandText: String) {
         val vm = voiceManager ?: return
         vm.processUserSpeech(commandText)
+        viewModelScope.launch {
+            kotlinx.coroutines.delay(400)
+            refreshProfileAndStats()
+        }
     }
 
     override fun onCleared() {
@@ -103,4 +164,3 @@ class MainViewModel : ViewModel() {
         voiceManager = null
     }
 }
-
