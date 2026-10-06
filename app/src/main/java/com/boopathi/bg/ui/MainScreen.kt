@@ -47,6 +47,7 @@ fun MainScreen(
     val memoryCount by viewModel.memoryCount.collectAsState()
     val noteCount by viewModel.noteCount.collectAsState()
     val taskCount by viewModel.taskCount.collectAsState()
+    val lastToolResult by viewModel.lastToolResult.collectAsState()
 
     if (showProfileDialog) {
         com.boopathi.bg.ui.components.OwnerProfileDialog(
@@ -84,6 +85,16 @@ fun MainScreen(
                     .weight(1f)
                     .fillMaxWidth()
             )
+
+            // Real-time Device Action Status Badge
+            lastToolResult?.let { toolRes ->
+                com.boopathi.bg.ui.components.ActionStatusBadge(
+                    toolResult = toolRes,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 4.dp)
+                )
+            }
 
             // Quick Testing Commands Bar
             QuickCommandBar(

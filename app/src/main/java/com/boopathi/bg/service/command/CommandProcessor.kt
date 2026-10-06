@@ -11,13 +11,16 @@ import com.boopathi.bg.service.ai.LocalFallbackProvider
 import com.boopathi.bg.service.memory.MemoryManager
 import com.boopathi.bg.service.security.DefaultOwnerVerificationService
 import com.boopathi.bg.service.security.OwnerVerificationService
+import com.boopathi.bg.service.tool.ToolIntentDetector
+import com.boopathi.bg.service.tool.ToolRegistry
 
 class CommandProcessor(
     private val memoryManager: MemoryManager,
     private val localProvider: LocalFallbackProvider = LocalFallbackProvider(),
     private val geminiProvider: AIProvider = GeminiProvider(),
     private val groqProvider: AIProvider = GroqProvider(),
-    private val ownerVerificationService: OwnerVerificationService = DefaultOwnerVerificationService()
+    private val ownerVerificationService: OwnerVerificationService = DefaultOwnerVerificationService(),
+    val toolRegistry: ToolRegistry? = null
 ) {
 
     companion object {
@@ -60,13 +63,35 @@ class CommandProcessor(
         // Routing Hierarchy:
         // Priority 1: Deterministic Memory, Note, or Task commands
         val memoryCommandResult = handleMemoryOrTaskCommand(trimmed, owner)
+        val toolIntent = ToolIntentDetector.detectIntent(trimmed)
+
         val result = if (memoryCommandResult != null) {
             Log.d(TAG, "Router: Executed via [${memoryCommandResult.providerName}]")
             memoryCommandResult
         } else if (localProvider.canHandleLocally(trimmed)) {
-            // Priority 2: Standard local deterministic commands (time, date, greeting, identity)
+            // Priority 1 (continued): Standard local conversational commands (time, date, greeting, identity)
             Log.d(TAG, "Router: Matched local deterministic command -> LocalProvider")
             localProvider.processCommand(trimmed, owner)
+        } else if (toolIntent != null) {
+            // Priority 2: Direct Android Tool command
+            Log.d(TAG, "Command: \"$trimmed\" | Intent: ${toolIntent.toolName} | Params: ${toolIntent.parameters}")
+            if (toolRegistry != null) {
+                val toolResult = toolRegistry.execute(toolIntent.toolName, toolIntent.parameters)
+                Log.i(TAG, "Command: \"$trimmed\" | Intent: ${toolIntent.toolName} | Tool: ${toolIntent.toolName} | Result: ${toolResult.status}")
+                CommandResult(
+                    textResponse = toolResult.message,
+                    providerName = "ToolRegistry",
+                    isSuccess = toolResult.isSuccess,
+                    toolResult = toolResult
+                )
+            } else {
+                Log.w(TAG, "ToolRegistry unavailable for detected intent ${toolIntent.toolName}")
+                CommandResult(
+                    textResponse = "I can't control device functions right now, ${owner.name}.",
+                    providerName = "ToolRegistry",
+                    isSuccess = false
+                )
+            }
         } else {
             // Priority 3: AI Provider with contextual memory retrieval
             val history = memoryManager.getRecentContext(maxTurns = 5)

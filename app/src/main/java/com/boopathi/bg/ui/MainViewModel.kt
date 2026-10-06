@@ -14,6 +14,13 @@ import com.boopathi.bg.service.command.CommandProcessor
 import com.boopathi.bg.service.memory.MemoryManager
 import com.boopathi.bg.service.memory.RoomMemoryManager
 import com.boopathi.bg.service.voice.VoiceManager
+import com.boopathi.bg.service.tool.FlashlightTool
+import com.boopathi.bg.service.tool.GoHomeTool
+import com.boopathi.bg.service.tool.OpenAppTool
+import com.boopathi.bg.service.tool.OpenSettingsTool
+import com.boopathi.bg.service.tool.ToolRegistry
+import com.boopathi.bg.service.tool.ToolResult
+import com.boopathi.bg.service.tool.VolumeTool
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -21,19 +28,35 @@ import kotlinx.coroutines.launch
 
 class MainViewModel @JvmOverloads constructor(
     application: Application,
-    customMemoryManager: MemoryManager? = null
+    customMemoryManager: MemoryManager? = null,
+    customToolRegistry: ToolRegistry? = null
 ) : AndroidViewModel(application) {
+
+    // Clean Architecture: Tool Registry with Phase 3 Android Tools
+    val toolRegistry: ToolRegistry = customToolRegistry ?: ToolRegistry().apply {
+        register(OpenAppTool(application))
+        register(FlashlightTool(application))
+        register(VolumeTool(application))
+        register(OpenSettingsTool(application))
+        register(GoHomeTool(application))
+    }
 
     // Dependency injection / Clean architecture
     val memoryManager: MemoryManager = customMemoryManager ?: RoomMemoryManager(
         repository = RoomBGRepository(BGDatabase.getInstance(application)),
         scope = viewModelScope
     )
-    private val commandProcessor: CommandProcessor = CommandProcessor(memoryManager)
+    private val commandProcessor: CommandProcessor = CommandProcessor(
+        memoryManager = memoryManager,
+        toolRegistry = toolRegistry
+    )
 
     private var voiceManager: VoiceManager? = null
 
     val messages: StateFlow<List<ChatMessage>> = memoryManager.getConversationFlow()
+
+    private val _lastToolResult = MutableStateFlow<ToolResult?>(null)
+    val lastToolResult: StateFlow<ToolResult?> = _lastToolResult.asStateFlow()
 
     private val _hasMicPermission = MutableStateFlow(false)
     val hasMicPermission: StateFlow<Boolean> = _hasMicPermission.asStateFlow()
@@ -102,7 +125,11 @@ class MainViewModel @JvmOverloads constructor(
             val vm = VoiceManager(
                 context = context.applicationContext,
                 commandProcessor = commandProcessor,
-                scope = viewModelScope
+                scope = viewModelScope,
+                onCommandProcessed = { result ->
+                    _lastToolResult.value = result.toolResult
+                    refreshProfileAndStats()
+                }
             )
             voiceManager = vm
 
@@ -150,11 +177,15 @@ class MainViewModel @JvmOverloads constructor(
     }
 
     fun executeCommand(commandText: String) {
-        val vm = voiceManager ?: return
-        vm.processUserSpeech(commandText)
-        viewModelScope.launch {
-            kotlinx.coroutines.delay(400)
-            refreshProfileAndStats()
+        val vm = voiceManager
+        if (vm != null) {
+            vm.processUserSpeech(commandText)
+        } else {
+            viewModelScope.launch {
+                val result = commandProcessor.processCommand(commandText)
+                _lastToolResult.value = result.toolResult
+                refreshProfileAndStats()
+            }
         }
     }
 

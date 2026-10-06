@@ -5,11 +5,24 @@
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.INTERNET" />
 
-    <!-- Queries required on Android 11+ to discover system speech recognition services -->
+    <!-- Hardware feature declared as optional for flashlight/torch inspection -->
+    <uses-feature android:name="android.hardware.camera.flash" android:required="false" />
+
+    <!-- Queries required on Android 11+ to discover launcher apps and system services -->
     <queries>
         <intent>
             <action android:name="android.speech.RecognitionService" />
         </intent>
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+        </intent>
+        <package android:name="com.google.android.youtube" />
+        <package android:name="com.instagram.android" />
+        <package android:name="com.whatsapp" />
+        <package android:name="com.google.android.gm" />
+        <package android:name="com.android.chrome" />
+        <package android:name="com.facebook.katana" />
+        <package android:name="com.android.settings" />
     </queries>
 
     <application

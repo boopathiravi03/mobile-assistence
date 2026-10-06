@@ -12,10 +12,13 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
+import com.boopathi.bg.data.model.CommandResult
+
 class VoiceManager(
     context: Context,
     private val commandProcessor: CommandProcessor,
-    private val scope: CoroutineScope
+    private val scope: CoroutineScope,
+    private val onCommandProcessed: ((CommandResult) -> Unit)? = null
 ) {
 
     private val _assistantState = MutableStateFlow(AssistantState.IDLE)
@@ -82,6 +85,7 @@ class VoiceManager(
 
         scope.launch(Dispatchers.Main) {
             val result = commandProcessor.processCommand(userSpeech)
+            onCommandProcessed?.invoke(result)
             speakResponse(result.spokenResponse)
         }
     }
