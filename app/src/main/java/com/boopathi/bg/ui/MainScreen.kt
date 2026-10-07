@@ -48,6 +48,11 @@ fun MainScreen(
     val noteCount by viewModel.noteCount.collectAsState()
     val taskCount by viewModel.taskCount.collectAsState()
     val lastToolResult by viewModel.lastToolResult.collectAsState()
+    val isAccessibilityEnabled by viewModel.isAccessibilityEnabled.collectAsState()
+    val isAccessibilityConnected by viewModel.isAccessibilityConnected.collectAsState()
+    val currentForegroundPackage by viewModel.currentForegroundPackage.collectAsState()
+    val appAgentState by viewModel.appAgentState.collectAsState()
+    val lastAppActionResult by viewModel.lastAppActionResult.collectAsState()
 
     if (showProfileDialog) {
         com.boopathi.bg.ui.components.OwnerProfileDialog(
@@ -76,6 +81,19 @@ fun MainScreen(
                 hasMicPermission = hasMicPermission,
                 errorMessage = errorMessage,
                 onProfileClick = { viewModel.openProfile() }
+            )
+
+            // Phase 4 App Agent Status Bar
+            com.boopathi.bg.ui.components.AppAgentStatusBar(
+                isAccessibilityEnabled = isAccessibilityEnabled,
+                isAccessibilityConnected = isAccessibilityConnected,
+                currentPackage = currentForegroundPackage,
+                agentState = appAgentState,
+                lastResult = lastAppActionResult,
+                onOpenSettingsClick = { viewModel.openAccessibilitySettings() },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 4.dp)
             )
 
             // Conversation Messages Area

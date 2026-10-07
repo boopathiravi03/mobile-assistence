@@ -21,6 +21,13 @@ import com.boopathi.bg.service.tool.OpenSettingsTool
 import com.boopathi.bg.service.tool.ToolRegistry
 import com.boopathi.bg.service.tool.ToolResult
 import com.boopathi.bg.service.tool.VolumeTool
+import com.boopathi.bg.service.accessibility.AndroidAccessibilityBridge
+import com.boopathi.bg.service.agent.AccessibilityBridge
+import com.boopathi.bg.service.agent.AppAgent
+import com.boopathi.bg.service.agent.AppActionResult
+import com.boopathi.bg.service.agent.AppAgentState
+import android.content.Intent
+import android.provider.Settings
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -29,7 +36,8 @@ import kotlinx.coroutines.launch
 class MainViewModel @JvmOverloads constructor(
     application: Application,
     customMemoryManager: MemoryManager? = null,
-    customToolRegistry: ToolRegistry? = null
+    customToolRegistry: ToolRegistry? = null,
+    customAccessibilityBridge: AccessibilityBridge? = null
 ) : AndroidViewModel(application) {
 
     // Clean Architecture: Tool Registry with Phase 3 Android Tools
@@ -41,6 +49,10 @@ class MainViewModel @JvmOverloads constructor(
         register(GoHomeTool(application))
     }
 
+    // Phase 4 Controlled App Agent & Accessibility Bridge
+    val accessibilityBridge: AccessibilityBridge = customAccessibilityBridge ?: AndroidAccessibilityBridge(application)
+    val appAgent: AppAgent = AppAgent(bridge = accessibilityBridge, toolRegistry = toolRegistry)
+
     // Dependency injection / Clean architecture
     val memoryManager: MemoryManager = customMemoryManager ?: RoomMemoryManager(
         repository = RoomBGRepository(BGDatabase.getInstance(application)),
@@ -48,7 +60,8 @@ class MainViewModel @JvmOverloads constructor(
     )
     private val commandProcessor: CommandProcessor = CommandProcessor(
         memoryManager = memoryManager,
-        toolRegistry = toolRegistry
+        toolRegistry = toolRegistry,
+        appAgent = appAgent
     )
 
     private var voiceManager: VoiceManager? = null
@@ -57,6 +70,18 @@ class MainViewModel @JvmOverloads constructor(
 
     private val _lastToolResult = MutableStateFlow<ToolResult?>(null)
     val lastToolResult: StateFlow<ToolResult?> = _lastToolResult.asStateFlow()
+
+    val appAgentState: StateFlow<AppAgentState> = appAgent.state
+    val lastAppActionResult: StateFlow<AppActionResult?> = appAgent.lastResult
+
+    private val _isAccessibilityEnabled = MutableStateFlow(false)
+    val isAccessibilityEnabled: StateFlow<Boolean> = _isAccessibilityEnabled.asStateFlow()
+
+    private val _isAccessibilityConnected = MutableStateFlow(false)
+    val isAccessibilityConnected: StateFlow<Boolean> = _isAccessibilityConnected.asStateFlow()
+
+    private val _currentForegroundPackage = MutableStateFlow("")
+    val currentForegroundPackage: StateFlow<String> = _currentForegroundPackage.asStateFlow()
 
     private val _hasMicPermission = MutableStateFlow(false)
     val hasMicPermission: StateFlow<Boolean> = _hasMicPermission.asStateFlow()
@@ -99,7 +124,21 @@ class MainViewModel @JvmOverloads constructor(
             _memoryCount.value = allMemories.filter { it.type != MemoryEntity.TYPE_NOTE }.size
             _noteCount.value = allMemories.filter { it.type == MemoryEntity.TYPE_NOTE }.size
             _taskCount.value = memoryManager.getTasks(completed = false).size
+            refreshAccessibilityStatus()
         }
+    }
+
+    fun refreshAccessibilityStatus() {
+        _isAccessibilityEnabled.value = accessibilityBridge.isServiceEnabled()
+        _isAccessibilityConnected.value = accessibilityBridge.isConnected()
+        _currentForegroundPackage.value = accessibilityBridge.getCurrentPackage()
+    }
+
+    fun openAccessibilitySettings() {
+        val intent = Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS).apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        getApplication<Application>().startActivity(intent)
     }
 
     fun openProfile() {

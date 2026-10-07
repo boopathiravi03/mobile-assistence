@@ -20,7 +20,8 @@ class CommandProcessor(
     private val geminiProvider: AIProvider = GeminiProvider(),
     private val groqProvider: AIProvider = GroqProvider(),
     private val ownerVerificationService: OwnerVerificationService = DefaultOwnerVerificationService(),
-    val toolRegistry: ToolRegistry? = null
+    val toolRegistry: ToolRegistry? = null,
+    val appAgent: com.boopathi.bg.service.agent.AppAgent? = null
 ) {
 
     companion object {
@@ -63,6 +64,8 @@ class CommandProcessor(
         // Routing Hierarchy:
         // Priority 1: Deterministic Memory, Note, or Task commands
         val memoryCommandResult = handleMemoryOrTaskCommand(trimmed, owner)
+        // Priority 1.5: Deterministic App Agent commands (UI inspection, controlled tap, scroll, back, home, compound app plans)
+        val appPlan = appAgent?.planner?.createPlan(trimmed)
         val toolIntent = ToolIntentDetector.detectIntent(trimmed)
 
         val result = if (memoryCommandResult != null) {
@@ -72,8 +75,19 @@ class CommandProcessor(
             // Priority 1 (continued): Standard local conversational commands (time, date, greeting, identity)
             Log.d(TAG, "Router: Matched local deterministic command -> LocalProvider")
             localProvider.processCommand(trimmed, owner)
+        } else if (appPlan != null && appAgent != null) {
+            // Priority 2: Controlled App Agent Action / Plan
+            Log.d(TAG, "Router: Matched AppAgent plan -> ${appPlan.goal} (${appPlan.size} actions)")
+            val agentResult = appAgent.executePlan(appPlan)
+            val responseText = formatAppAgentResponse(agentResult, appPlan, owner)
+            CommandResult(
+                textResponse = responseText,
+                providerName = "AppAgent",
+                isSuccess = agentResult.isSuccess,
+                appActionResult = agentResult
+            )
         } else if (toolIntent != null) {
-            // Priority 2: Direct Android Tool command
+            // Priority 3: Direct Android Tool command
             Log.d(TAG, "Command: \"$trimmed\" | Intent: ${toolIntent.toolName} | Params: ${toolIntent.parameters}")
             if (toolRegistry != null) {
                 val toolResult = toolRegistry.execute(toolIntent.toolName, toolIntent.parameters)
@@ -376,6 +390,75 @@ class CommandProcessor(
                 providerName = providerName,
                 isSuccess = false
             )
+        }
+    }
+
+    private fun formatAppAgentResponse(
+        result: com.boopathi.bg.service.agent.AppActionResult,
+        plan: com.boopathi.bg.service.agent.AppPlan,
+        owner: OwnerProfile
+    ): String {
+        return when (result.status) {
+            com.boopathi.bg.service.agent.AppActionResultStatus.REQUIRES_ACCESSIBILITY -> {
+                "App Control permission is not enabled. Please enable BG in Accessibility settings first."
+            }
+            com.boopathi.bg.service.agent.AppActionResultStatus.BLOCKED -> {
+                "Action blocked by safety policy. BG cannot interact with sensitive password, credential, or payment controls."
+            }
+            com.boopathi.bg.service.agent.AppActionResultStatus.REQUIRES_CONFIRMATION -> {
+                "This action requires confirmation: ${result.reason ?: "Potentially sensitive action."}"
+            }
+            com.boopathi.bg.service.agent.AppActionResultStatus.NOT_FOUND -> {
+                result.reason ?: "Could not find '${result.targetDescription}' on the visible screen."
+            }
+            com.boopathi.bg.service.agent.AppActionResultStatus.TIMEOUT -> {
+                result.reason ?: "Window timeout waiting for target application."
+            }
+            com.boopathi.bg.service.agent.AppActionResultStatus.UNAVAILABLE -> {
+                result.reason ?: "Requested target is unavailable."
+            }
+            com.boopathi.bg.service.agent.AppActionResultStatus.FAILED -> {
+                result.reason ?: "Action failed on '${result.targetDescription}'."
+            }
+            com.boopathi.bg.service.agent.AppActionResultStatus.SUCCESS -> {
+                when (result.actionType) {
+                    com.boopathi.bg.service.agent.AppActionType.INSPECT_UI -> {
+                        @Suppress("UNCHECKED_CAST")
+                        val elements = result.data["elements"] as? List<com.boopathi.bg.service.agent.UiElementInfo>
+                        if (elements.isNullOrEmpty()) {
+                            "On your screen, I see no interactive UI elements."
+                        } else {
+                            val actionable = elements.filter { it.isClickable || it.isEditable }
+                            val labels = actionable.map { it.displayLabel }.distinct().take(6)
+                            if (labels.isNotEmpty()) {
+                                "On your screen, I found ${elements.size} elements including: ${labels.joinToString(", ")}."
+                            } else {
+                                val textSample = elements.map { it.displayLabel }.distinct().take(4)
+                                "On your screen, I see: ${textSample.joinToString(", ")}."
+                            }
+                        }
+                    }
+                    com.boopathi.bg.service.agent.AppActionType.TAP -> {
+                        "Tapped ${result.targetDescription}."
+                    }
+                    com.boopathi.bg.service.agent.AppActionType.TYPE_TEXT -> {
+                        "Entered text into ${result.targetDescription}."
+                    }
+                    com.boopathi.bg.service.agent.AppActionType.SCROLL -> {
+                        "Scrolled screen successfully."
+                    }
+                    com.boopathi.bg.service.agent.AppActionType.BACK -> {
+                        "Navigated back."
+                    }
+                    com.boopathi.bg.service.agent.AppActionType.HOME -> {
+                        "Navigated to home screen."
+                    }
+                    com.boopathi.bg.service.agent.AppActionType.OPEN_APP,
+                    com.boopathi.bg.service.agent.AppActionType.WAIT_FOR_WINDOW -> {
+                        "Completed: ${plan.goal}."
+                    }
+                }
+            }
         }
     }
 }

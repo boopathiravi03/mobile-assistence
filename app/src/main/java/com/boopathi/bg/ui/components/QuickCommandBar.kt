@@ -29,6 +29,14 @@ fun QuickCommandBar(
 ) {
     val quickCommands = listOf(
         "Open Settings",
+        "Inspect this screen",
+        "Screen-la enna irukku sollu",
+        "Scroll down",
+        "Keela scroll pannu",
+        "Scroll up",
+        "Mela scroll pannu",
+        "Go back",
+        "Back po",
         "Open WiFi settings",
         "Turn on flashlight",
         "Turn off flashlight",
