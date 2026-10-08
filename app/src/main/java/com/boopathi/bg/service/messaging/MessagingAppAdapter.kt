@@ -37,9 +37,17 @@ open class WhatsAppMessagingAdapter : MessagingAppAdapter {
         }
 
         val elements = bridge.getVisibleElements()
-        val recipientMatches = elements.any {
-            it.text.contains(expectedRecipient, ignoreCase = true) ||
-            it.contentDescription.contains(expectedRecipient, ignoreCase = true)
+
+        // 1. Prioritize conversation header / action bar elements near the top of the screen (bounds.bottom <= 800)
+        // or any element if bounds are not set / empty (e.g. In unit tests)
+        val candidateElements = elements.filter {
+            it.bounds.isEmpty || it.bounds.bottom <= 800
+        }
+
+        val recipientMatches = candidateElements.any {
+            val textMatch = it.text.contains(expectedRecipient, ignoreCase = true)
+            val descMatch = it.contentDescription.contains(expectedRecipient, ignoreCase = true)
+            textMatch || descMatch
         }
 
         return recipientMatches
@@ -50,25 +58,41 @@ open class WhatsAppMessagingAdapter : MessagingAppAdapter {
         val editable = elements.filter { it.isEditable }
 
         return editable.any {
-            it.text.contains(expectedDraft, ignoreCase = true) ||
-            it.contentDescription.contains(expectedDraft, ignoreCase = true)
+            val fieldText = it.text.trim()
+            val expected = expectedDraft.trim()
+            fieldText.equals(expected, ignoreCase = true) || fieldText.contains(expected, ignoreCase = true)
         }
     }
 
     override suspend fun findSendButton(bridge: AccessibilityBridge): UiElementInfo? {
         val elements = bridge.getVisibleElements()
 
-        // 1. Exact accessible label or description
+        // Filter for actionable candidates while strictly excluding voice note / audio controls
         val candidates = elements.filter { el ->
+            val desc = el.contentDescription.lowercase().trim()
+            val txt = el.text.lowercase().trim()
+            val id = el.viewId.lowercase().trim()
+
+            // Disallow voice message / audio recorder controls
+            val isVoice = desc.contains("voice") || desc.contains("record") || desc.contains("audio") ||
+                    id.contains("voice") || id.contains("record")
+            if (isVoice) return@filter false
+
             el.isClickable && el.isEnabled && (
-                el.contentDescription.equals("Send", ignoreCase = true) ||
-                el.text.equals("Send", ignoreCase = true) ||
-                el.contentDescription.contains("Send message", ignoreCase = true) ||
-                el.viewId.contains("send", ignoreCase = true)
+                desc == "send" ||
+                desc == "send message" ||
+                desc == "anuppu" ||
+                desc == "enviar" ||
+                desc.contains("send") ||
+                txt == "send" ||
+                txt == "anuppu" ||
+                id.contains("send") ||
+                id.contains("entry_action")
             )
         }
 
-        return candidates.firstOrNull()
+        // Prefer leaf nodes (higher depth in hierarchy) to hit the exact clickable ImageButton
+        return candidates.maxByOrNull { it.depth } ?: candidates.firstOrNull()
     }
 
     open override suspend fun verifyMessageSent(
@@ -79,13 +103,15 @@ open class WhatsAppMessagingAdapter : MessagingAppAdapter {
         val startTime = System.currentTimeMillis()
 
         while (System.currentTimeMillis() - startTime < timeoutMs) {
-            delay(500)
+            delay(300)
             val elements = bridge.getVisibleElements()
 
             // Signal 1: The input field is now empty or contains placeholder
             val editable = elements.filter { it.isEditable }
             val inputCleared = editable.isNotEmpty() && editable.all {
-                it.text.isEmpty() || it.text.equals("Type a message", ignoreCase = true) || it.text.equals("Message", ignoreCase = true)
+                val t = it.text.trim()
+                t.isEmpty() || t.equals("Type a message", ignoreCase = true) ||
+                t.equals("Message", ignoreCase = true) || t.equals("Enter message", ignoreCase = true)
             }
 
             // Signal 2: The message text appears in the conversation history as an outgoing message bubble
