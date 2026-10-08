@@ -44,7 +44,9 @@ fun AppAgentStatusBar(
     lastResult: AppActionResult?,
     currentTask: AgentTask? = null,
     taskState: AgentTaskState = AgentTaskState.IDLE,
+    notificationStatus: com.boopathi.bg.service.notification.NotificationAccessStatus = com.boopathi.bg.service.notification.NotificationAccessStatus.NOT_ENABLED,
     onOpenSettingsClick: () -> Unit,
+    onOpenNotificationSettingsClick: () -> Unit = {},
     onCancelTaskClick: () -> Unit = {},
     onConfirmClick: () -> Unit = {},
     modifier: Modifier = Modifier
@@ -140,6 +142,50 @@ fun AppAgentStatusBar(
                             .padding(horizontal = 6.dp, vertical = 2.dp)
                     )
                 }
+            }
+        }
+
+        // Notification Access status row
+        Spacer(modifier = Modifier.height(4.dp))
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            val notifConnected = notificationStatus == com.boopathi.bg.service.notification.NotificationAccessStatus.CONNECTED
+            val notifColor = when (notificationStatus) {
+                com.boopathi.bg.service.notification.NotificationAccessStatus.CONNECTED -> Color(0xFF00E676)
+                com.boopathi.bg.service.notification.NotificationAccessStatus.ENABLED_BUT_DISCONNECTED -> PulseAmber
+                else -> Color(0xFFFF5252)
+            }
+            val notifLabel = when (notificationStatus) {
+                com.boopathi.bg.service.notification.NotificationAccessStatus.CONNECTED -> "● Connected"
+                com.boopathi.bg.service.notification.NotificationAccessStatus.ENABLED_BUT_DISCONNECTED -> "● Standby"
+                else -> "○ Not Enabled"
+            }
+
+            Text(
+                text = "🔔 NOTIFICATIONS: $notifLabel",
+                color = notifColor,
+                fontSize = 10.sp,
+                fontFamily = FontFamily.Monospace,
+                fontWeight = FontWeight.SemiBold
+            )
+
+            if (!notifConnected) {
+                Text(
+                    text = "⚙️ ACCESS",
+                    color = Color(0xFF00E5FF),
+                    fontSize = 10.sp,
+                    fontFamily = FontFamily.Monospace,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(4.dp))
+                        .background(ElectricBlue.copy(alpha = 0.25f))
+                        .border(1.dp, NeonCyan.copy(alpha = 0.5f), RoundedCornerShape(4.dp))
+                        .clickable { onOpenNotificationSettingsClick() }
+                        .padding(horizontal = 6.dp, vertical = 2.dp)
+                )
             }
         }
 

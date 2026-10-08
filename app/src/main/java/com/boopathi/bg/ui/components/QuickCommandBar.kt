@@ -28,6 +28,11 @@ fun QuickCommandBar(
     modifier: Modifier = Modifier
 ) {
     val quickCommands = listOf(
+        "What notifications came?",
+        "Inniku enna notifications vandhurukku?",
+        "Karthi-ku hi message anuppu",
+        "Did Karthi message me?",
+        "Read my latest message notification",
         "Open YouTube and inspect the screen",
         "YouTube open panni Search button-a tap pannu",
         "Open YouTube and tap Search",

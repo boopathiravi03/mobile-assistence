@@ -22,7 +22,9 @@ class CommandProcessor(
     private val ownerVerificationService: OwnerVerificationService = DefaultOwnerVerificationService(),
     val toolRegistry: ToolRegistry? = null,
     val appAgent: com.boopathi.bg.service.agent.AppAgent? = null,
-    val multiStepAgent: com.boopathi.bg.service.agent.MultiStepAgent? = null
+    val multiStepAgent: com.boopathi.bg.service.agent.MultiStepAgent? = null,
+    val notificationAccessManager: com.boopathi.bg.service.notification.NotificationAccessManager? = null,
+    val messagingTargetResolver: com.boopathi.bg.service.messaging.MessagingTargetResolver = com.boopathi.bg.service.messaging.MessagingTargetResolver()
 ) {
 
     companion object {
@@ -77,6 +79,13 @@ class CommandProcessor(
         // Routing Hierarchy:
         // Priority 1: Deterministic Memory, Note, or Task commands
         val memoryCommandResult = handleMemoryOrTaskCommand(trimmed, owner)
+
+        // Priority 1.2: Notification Awareness Commands
+        val notificationCommandResult = handleNotificationCommand(trimmed, owner)
+
+        // Priority 1.3: Safe Messaging Preparation Commands
+        val messagingPreparationResult = handleMessagingPreparationCommand(trimmed, owner)
+
         // Priority 1.5: Multi-step App Agent task decomposition & execution
         val planner = multiStepAgent?.appAgent?.planner ?: appAgent?.planner
         val agentTask = planner?.createTask(trimmed)
@@ -85,6 +94,12 @@ class CommandProcessor(
         val result = if (memoryCommandResult != null) {
             Log.d(TAG, "Router: Executed via [${memoryCommandResult.providerName}]")
             memoryCommandResult
+        } else if (notificationCommandResult != null) {
+            Log.d(TAG, "Router: Executed via [${notificationCommandResult.providerName}]")
+            notificationCommandResult
+        } else if (messagingPreparationResult != null) {
+            Log.d(TAG, "Router: Executed via [${messagingPreparationResult.providerName}]")
+            messagingPreparationResult
         } else if (localProvider.canHandleLocally(trimmed)) {
             // Priority 1 (continued): Standard local conversational commands (time, date, greeting, identity)
             Log.d(TAG, "Router: Matched local deterministic command -> LocalProvider")
@@ -403,6 +418,181 @@ class CommandProcessor(
         }
 
         return null
+    }
+
+    private suspend fun handleNotificationCommand(text: String, owner: OwnerProfile): CommandResult? {
+        val lower = text.lowercase().trim().removeSuffix(".").removeSuffix("?").trim()
+
+        val isNotificationQuery = lower in listOf(
+            "what notifications came", "show my notifications", "any new messages", "any new notifications",
+            "read my notifications", "read my latest message notification", "read latest message",
+            "inniku enna notifications vandhurukku", "enna notifications vandhurukku",
+            "yaar message pannirukanga", "latest message notification sollu", "notifications enna vandhurukku"
+        ) || lower.startsWith("did ") && lower.endsWith(" message me") ||
+           lower.contains("message pannirukara") || lower.contains("message pannirukangala") ||
+           lower.startsWith("read ") && lower.contains("latest message")
+
+        if (!isNotificationQuery) return null
+
+        val mgr = notificationAccessManager
+        if (mgr == null || !mgr.isAccessGranted()) {
+            return CommandResult(
+                textResponse = "${owner.name}, Notification Access is not enabled. Please enable BG in Notification Access settings first.",
+                providerName = "NotificationService",
+                isSuccess = false
+            )
+        }
+
+        val repo = mgr.repository
+        val recentNotifs = repo.getRecentNotifications()
+
+        // 1. Check for specific sender query: E.g., "Did Karthi message me?" or "Karthi message pannirukara?"
+        val senderQuery = when {
+            lower.startsWith("did ") && lower.endsWith(" message me") -> {
+                lower.removePrefix("did ").removeSuffix(" message me").trim()
+            }
+            lower.contains("message pannirukara") -> {
+                lower.substringBefore("message pannirukara").trim()
+            }
+            lower.contains("message pannirukangala") -> {
+                lower.substringBefore("message pannirukangala").trim()
+            }
+            else -> null
+        }
+
+        if (senderQuery != null && senderQuery.isNotEmpty()) {
+            val matching = repo.findNotificationsForSender(senderQuery)
+            return if (matching.isNotEmpty()) {
+                val latest = matching.first()
+                val summary = if (latest.isRedacted) {
+                    "Yes, ${latest.senderName} sent a notification, but sensitive details are hidden for privacy."
+                } else {
+                    "Yes, ${latest.senderName} message pannirukanga on ${latest.appLabel}: \"${latest.text}\"."
+                }
+                CommandResult(
+                    textResponse = summary,
+                    providerName = "NotificationService",
+                    isSuccess = true
+                )
+            } else {
+                CommandResult(
+                    textResponse = "No, ${owner.name}, $senderQuery kitendhu entha message notification-um varala.",
+                    providerName = "NotificationService",
+                    isSuccess = true
+                )
+            }
+        }
+
+        // 2. Read specific latest message request: "Read my latest message notification" or "Read Karthi's latest message"
+        if (lower.contains("read ") || lower.contains("sollu")) {
+            val messagingNotifs = repo.getRecentMessagingNotifications()
+            if (messagingNotifs.isEmpty()) {
+                return CommandResult(
+                    textResponse = "There are no recent message notifications, ${owner.name}.",
+                    providerName = "NotificationService",
+                    isSuccess = true
+                )
+            }
+            val latest = messagingNotifs.first()
+            val text = if (latest.isRedacted) {
+                "I received a sensitive message notification from ${latest.senderName}, but won't read security details aloud."
+            } else {
+                "${latest.appLabel}-la from ${latest.senderName}: \"${latest.text}\"."
+            }
+            return CommandResult(
+                textResponse = text,
+                providerName = "NotificationService",
+                isSuccess = true
+            )
+        }
+
+        // 3. General notification summary: "What notifications came?" / "Enna notifications vandhurukku?"
+        if (recentNotifs.isEmpty()) {
+            return CommandResult(
+                textResponse = "You have no new notifications right now, ${owner.name}.",
+                providerName = "NotificationService",
+                isSuccess = true
+            )
+        }
+
+        val messagingCount = recentNotifs.count { it.isMessaging }
+        val apps = recentNotifs.map { it.appLabel }.distinct().take(3).joinToString(", ")
+        val summary = if (messagingCount > 0) {
+            val sampleSender = recentNotifs.firstOrNull { it.isMessaging }?.senderName ?: "someone"
+            "${recentNotifs.size} notifications vandhirukku. $apps-la messages including from $sampleSender."
+        } else {
+            "${recentNotifs.size} new notifications from $apps."
+        }
+
+        return CommandResult(
+            textResponse = summary,
+            providerName = "NotificationService",
+            isSuccess = true
+        )
+    }
+
+    private suspend fun handleMessagingPreparationCommand(text: String, owner: OwnerProfile): CommandResult? {
+        val lower = text.lowercase().trim().removeSuffix(".").removeSuffix("!").trim()
+
+        // Match English: "send <message> to <recipient>", "prepare message to <recipient>: <message>"
+        // Match Tanglish: "<recipient>-ku <message> message anuppu", "<recipient>-ku <message> anuppu", "<recipient> message anuppu"
+        var recipient: String? = null
+        var messageBody: String? = null
+        var app = "WhatsApp"
+
+        val tanglishRegex1 = Regex("^(.+?)(?:-ku|\\s+ku)\\s+(.+?)\\s+message\\s+(?:anuppu|prepare\\s+pannu)$", RegexOption.IGNORE_CASE)
+        val tanglishRegex2 = Regex("^(.+?)(?:-ku|\\s+ku)\\s+(.+?)\\s+anuppu$", RegexOption.IGNORE_CASE)
+        val englishRegex1 = Regex("^(?:send|prepare\\s+message)\\s+(?:to\\s+)?(.+?):?\\s+(?:message\\s+)?(.+)$", RegexOption.IGNORE_CASE)
+
+        val m1 = tanglishRegex1.matchEntire(lower)
+        val m2 = tanglishRegex2.matchEntire(lower)
+        val m3 = englishRegex1.matchEntire(lower)
+
+        when {
+            m1 != null -> {
+                recipient = m1.groupValues[1].trim()
+                messageBody = m1.groupValues[2].trim()
+            }
+            m2 != null -> {
+                recipient = m2.groupValues[1].trim()
+                messageBody = m2.groupValues[2].trim()
+            }
+            m3 != null -> {
+                recipient = m3.groupValues[1].trim()
+                messageBody = m3.groupValues[2].trim()
+            }
+        }
+
+        if (recipient == null || messageBody == null) return null
+        if (recipient.isBlank() || messageBody.isBlank()) return null
+
+        val resolution = messagingTargetResolver.resolveTarget(recipient)
+        val resolvedTarget = resolution.target?.displayName ?: messagingTargetResolver.cleanRecipientName(recipient)
+
+        val draft = com.boopathi.bg.service.messaging.MessageDraft(
+            recipient = resolvedTarget,
+            messageText = messageBody,
+            sourceApp = app
+        )
+
+        val task = com.boopathi.bg.service.messaging.MessagePreparationTask.createPreparationTask(draft)
+
+        return if (multiStepAgent != null) {
+            val executedTask = multiStepAgent.executeTask(task)
+            val responseText = "Prepared message draft for $resolvedTarget: '$messageBody'. Ready to send. Send this message?"
+            CommandResult(
+                textResponse = responseText,
+                providerName = "MessagingPreparation",
+                isSuccess = true,
+                agentTask = executedTask
+            )
+        } else {
+            CommandResult(
+                textResponse = "Draft created for $resolvedTarget: '$messageBody'.",
+                providerName = "MessagingPreparation",
+                isSuccess = true
+            )
+        }
     }
 
     private fun fallbackWithMemoriesOrSafeMessage(

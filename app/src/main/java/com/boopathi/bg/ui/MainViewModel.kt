@@ -54,6 +54,12 @@ class MainViewModel @JvmOverloads constructor(
     val appAgent: AppAgent = AppAgent(bridge = accessibilityBridge, toolRegistry = toolRegistry)
     val multiStepAgent: com.boopathi.bg.service.agent.MultiStepAgent = com.boopathi.bg.service.agent.MultiStepAgent(appAgent = appAgent)
 
+    // Phase 5B Notification Access Manager & Safe Messaging
+    val notificationAccessManager: com.boopathi.bg.service.notification.NotificationAccessManager =
+        com.boopathi.bg.service.notification.NotificationAccessManager.getInstance(application)
+    val notificationStatus = notificationAccessManager.status
+    val recentNotifications = notificationAccessManager.repository.notificationFlow
+
     // Dependency injection / Clean architecture
     val memoryManager: MemoryManager = customMemoryManager ?: RoomMemoryManager(
         repository = RoomBGRepository(BGDatabase.getInstance(application)),
@@ -63,7 +69,8 @@ class MainViewModel @JvmOverloads constructor(
         memoryManager = memoryManager,
         toolRegistry = toolRegistry,
         appAgent = appAgent,
-        multiStepAgent = multiStepAgent
+        multiStepAgent = multiStepAgent,
+        notificationAccessManager = notificationAccessManager
     )
 
     private var voiceManager: VoiceManager? = null
@@ -233,6 +240,15 @@ class MainViewModel @JvmOverloads constructor(
         }
     }
 
+    fun openNotificationSettings() {
+        val intent = notificationAccessManager.getSettingsIntent()
+        getApplication<Application>().startActivity(intent)
+    }
+
+    fun refreshNotificationStatus() {
+        notificationAccessManager.checkStatus()
+    }
+
     fun cancelTask() {
         multiStepAgent.cancelCurrentTask("Cancelled by user via UI")
     }
@@ -240,9 +256,10 @@ class MainViewModel @JvmOverloads constructor(
     fun confirmAction() {
         val task = multiStepAgent.currentTask.value
         if (task != null && task.state == com.boopathi.bg.service.agent.AgentTaskState.WAITING_FOR_CONFIRMATION) {
-            // For Phase 5A security boundary: messaging SEND action returns UNSUPPORTED
+            // CRITICAL PHASE 5B SAFETY BOUNDARY:
+            // Confirm must NOT actually send the message.
             viewModelScope.launch {
-                val failureMsg = "Actual message sending / mutation is not supported in Phase 5A."
+                val failureMsg = "Message sending is not enabled in Phase 5B yet."
                 task.state = com.boopathi.bg.service.agent.AgentTaskState.FAILED
                 task.failureReason = failureMsg
                 memoryManager.logInteraction("Confirm", failureMsg)
