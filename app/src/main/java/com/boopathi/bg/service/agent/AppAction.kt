@@ -61,5 +61,14 @@ sealed class AppAction {
         override val type: AppActionType = AppActionType.HOME
         override val targetDescription: String = "System Home"
     }
+
+    data class SendMessage(
+        val expectedRecipient: String,
+        val expectedMessage: String,
+        val targetApp: String = "WhatsApp"
+    ) : AppAction() {
+        override val type: AppActionType = AppActionType.SEND_MESSAGE
+        override val targetDescription: String = "Send message to $expectedRecipient via $targetApp"
+    }
 }
 

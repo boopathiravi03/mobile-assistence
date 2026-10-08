@@ -346,6 +346,7 @@ class AppPlanner {
                 is AppAction.Scroll -> "Scroll ${action.direction.name.lowercase()}"
                 is AppAction.Back -> "Navigate Back"
                 is AppAction.Home -> "Navigate Home"
+                is AppAction.SendMessage -> "Send message to ${action.expectedRecipient}"
             }
             AgentStep(
                 action = action,

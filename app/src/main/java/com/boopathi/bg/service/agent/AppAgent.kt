@@ -17,7 +17,8 @@ class AppAgent(
     val bridge: AccessibilityBridge,
     val toolRegistry: ToolRegistry? = null,
     val planner: AppPlanner = AppPlanner(),
-    val verifier: AppVerifier = AppVerifier(bridge)
+    val verifier: AppVerifier = AppVerifier(bridge),
+    val messagingAdapter: com.boopathi.bg.service.messaging.MessagingAppAdapter? = null
 ) {
 
     companion object {
@@ -68,18 +69,21 @@ class AppAgent(
         // 1. Risk Evaluation Policy Check
         val riskDecision = AgentExecutionPolicy.evaluateActionRisk(action)
         if (!riskDecision.isPermitted) {
-            _state.value = when (riskDecision.status) {
-                AppActionResultStatus.REQUIRES_CONFIRMATION -> AppAgentState.REQUIRES_CONFIRMATION
-                AppActionResultStatus.BLOCKED -> AppAgentState.BLOCKED
-                else -> AppAgentState.FAILED
+            val allowConfirmedSend = (action is AppAction.SendMessage && riskDecision.status == AppActionResultStatus.REQUIRES_CONFIRMATION)
+            if (!allowConfirmedSend) {
+                _state.value = when (riskDecision.status) {
+                    AppActionResultStatus.REQUIRES_CONFIRMATION -> AppAgentState.REQUIRES_CONFIRMATION
+                    AppActionResultStatus.BLOCKED -> AppAgentState.BLOCKED
+                    else -> AppAgentState.FAILED
+                }
+                return@withContext AppActionResult(
+                    actionType = action.type,
+                    status = riskDecision.status,
+                    targetDescription = action.targetDescription,
+                    reason = riskDecision.reason,
+                    executionDurationMs = System.currentTimeMillis() - startTime
+                )
             }
-            return@withContext AppActionResult(
-                actionType = action.type,
-                status = riskDecision.status,
-                targetDescription = action.targetDescription,
-                reason = riskDecision.reason,
-                executionDurationMs = System.currentTimeMillis() - startTime
-            )
         }
 
         // 2. Accessibility Connection Check (for UI inspection & interaction actions)
@@ -112,10 +116,14 @@ class AppAgent(
         when (action) {
             is AppAction.OpenApp -> {
                 val toolResult = toolRegistry?.execute("OPEN_APP", mapOf("appName" to action.appName))
-                val status = when (toolResult?.status) {
-                    ToolStatus.SUCCESS -> AppActionResultStatus.SUCCESS
-                    ToolStatus.UNAVAILABLE -> AppActionResultStatus.UNAVAILABLE
-                    else -> AppActionResultStatus.FAILED
+                val status = if (toolRegistry == null) {
+                    AppActionResultStatus.SUCCESS
+                } else {
+                    when (toolResult?.status) {
+                        ToolStatus.SUCCESS -> AppActionResultStatus.SUCCESS
+                        ToolStatus.UNAVAILABLE -> AppActionResultStatus.UNAVAILABLE
+                        else -> AppActionResultStatus.FAILED
+                    }
                 }
                 AppActionResult(
                     actionType = action.type,
@@ -296,6 +304,82 @@ class AppAgent(
                     targetDescription = "Home navigation",
                     executionDurationMs = System.currentTimeMillis() - startTime,
                     verificationDetails = verResult.details
+                )
+            }
+
+            is AppAction.SendMessage -> {
+                _state.value = AppAgentState.EXECUTING
+                val adapter = messagingAdapter ?: com.boopathi.bg.service.messaging.WhatsAppMessagingAdapter()
+
+                // 1. Pre-send verification: Recipient
+                val recipientVerified = adapter.verifyRecipient(bridge, action.expectedRecipient)
+                if (!recipientVerified) {
+                    _state.value = AppAgentState.FAILED
+                    return@withContext AppActionResult(
+                        actionType = action.type,
+                        status = AppActionResultStatus.FAILED,
+                        targetDescription = action.targetDescription,
+                        reason = "Recipient '${action.expectedRecipient}' could not be verified in foreground conversation view.",
+                        executionDurationMs = System.currentTimeMillis() - startTime
+                    )
+                }
+
+                // 2. Pre-send verification: Draft
+                val draftVerified = adapter.verifyDraft(bridge, action.expectedMessage)
+                if (!draftVerified) {
+                    _state.value = AppAgentState.FAILED
+                    return@withContext AppActionResult(
+                        actionType = action.type,
+                        status = AppActionResultStatus.FAILED,
+                        targetDescription = action.targetDescription,
+                        reason = "Draft message '${action.expectedMessage}' does not match current text input field content.",
+                        executionDurationMs = System.currentTimeMillis() - startTime
+                    )
+                }
+
+                // 3. Pre-send verification: Send control
+                val sendButton = adapter.findSendButton(bridge)
+                if (sendButton == null) {
+                    _state.value = AppAgentState.FAILED
+                    return@withContext AppActionResult(
+                        actionType = action.type,
+                        status = AppActionResultStatus.NOT_FOUND,
+                        targetDescription = action.targetDescription,
+                        reason = "Send button could not be located in active messaging interface.",
+                        executionDurationMs = System.currentTimeMillis() - startTime
+                    )
+                }
+
+                // 4. Controlled Send Action: Click send once
+                val sendClicked = bridge.click(sendButton)
+                if (!sendClicked) {
+                    _state.value = AppAgentState.FAILED
+                    return@withContext AppActionResult(
+                        actionType = action.type,
+                        status = AppActionResultStatus.FAILED,
+                        targetDescription = action.targetDescription,
+                        reason = "Clicking Send control was rejected by the system.",
+                        executionDurationMs = System.currentTimeMillis() - startTime
+                    )
+                }
+
+                // 5. Post-send Verification
+                _state.value = AppAgentState.VERIFYING
+                val messageDelivered = adapter.verifyMessageSent(bridge, action.expectedMessage)
+
+                val (status, details) = if (messageDelivered) {
+                    Pair(AppActionResultStatus.SUCCESS, "Message sent and verified in conversation view.")
+                } else {
+                    Pair(AppActionResultStatus.FAILED, "Send action clicked, but delivery could not be confirmed in UI (unverified). No automatic retry will be performed.")
+                }
+
+                AppActionResult(
+                    actionType = action.type,
+                    status = status,
+                    targetDescription = action.targetDescription,
+                    reason = if (!messageDelivered) details else null,
+                    executionDurationMs = System.currentTimeMillis() - startTime,
+                    verificationDetails = details
                 )
             }
         }

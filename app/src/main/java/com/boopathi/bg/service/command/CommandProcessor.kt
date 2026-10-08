@@ -566,6 +566,16 @@ class CommandProcessor(
         if (recipient == null || messageBody == null) return null
         if (recipient.isBlank() || messageBody.isBlank()) return null
 
+        // Sensitive / Financial Content Safety Gate
+        if (!com.boopathi.bg.service.messaging.MessagingPolicy.isContentSafeToSend(messageBody)) {
+            val blockedMsg = "I can't send messages containing sensitive authentication or financial information."
+            return CommandResult(
+                textResponse = blockedMsg,
+                providerName = "MessagingPolicy",
+                isSuccess = false
+            )
+        }
+
         val resolution = messagingTargetResolver.resolveTarget(recipient)
         val resolvedTarget = resolution.target?.displayName ?: messagingTargetResolver.cleanRecipientName(recipient)
 
@@ -579,6 +589,9 @@ class CommandProcessor(
 
         return if (multiStepAgent != null) {
             val executedTask = multiStepAgent.executeTask(task)
+            if (executedTask.state == com.boopathi.bg.service.agent.AgentTaskState.SUCCESS) {
+                executedTask.state = com.boopathi.bg.service.agent.AgentTaskState.WAITING_FOR_CONFIRMATION
+            }
             val responseText = "Prepared message draft for $resolvedTarget: '$messageBody'. Ready to send. Send this message?"
             CommandResult(
                 textResponse = responseText,
@@ -682,6 +695,9 @@ class CommandProcessor(
                     com.boopathi.bg.service.agent.AppActionType.OPEN_APP,
                     com.boopathi.bg.service.agent.AppActionType.WAIT_FOR_WINDOW -> {
                         "Completed: ${plan.goal}."
+                    }
+                    com.boopathi.bg.service.agent.AppActionType.SEND_MESSAGE -> {
+                        "Dispatched and verified message."
                     }
                 }
             }

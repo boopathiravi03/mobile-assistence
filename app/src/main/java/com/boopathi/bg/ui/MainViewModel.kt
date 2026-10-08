@@ -37,8 +37,12 @@ class MainViewModel @JvmOverloads constructor(
     application: Application,
     customMemoryManager: MemoryManager? = null,
     customToolRegistry: ToolRegistry? = null,
-    customAccessibilityBridge: AccessibilityBridge? = null
+    customAccessibilityBridge: AccessibilityBridge? = null,
+    customOwnerAuthGate: com.boopathi.bg.service.security.OwnerAuthGate? = null
 ) : AndroidViewModel(application) {
+
+    val ownerAuthGate: com.boopathi.bg.service.security.OwnerAuthGate =
+        customOwnerAuthGate ?: com.boopathi.bg.service.security.SimpleOwnerAuthGate()
 
     // Clean Architecture: Tool Registry with Phase 3 Android Tools
     val toolRegistry: ToolRegistry = customToolRegistry ?: ToolRegistry().apply {
@@ -256,13 +260,88 @@ class MainViewModel @JvmOverloads constructor(
     fun confirmAction() {
         val task = multiStepAgent.currentTask.value
         if (task != null && task.state == com.boopathi.bg.service.agent.AgentTaskState.WAITING_FOR_CONFIRMATION) {
-            // CRITICAL PHASE 5B SAFETY BOUNDARY:
-            // Confirm must NOT actually send the message.
             viewModelScope.launch {
-                val failureMsg = "Message sending is not enabled in Phase 5B yet."
-                task.state = com.boopathi.bg.service.agent.AgentTaskState.FAILED
-                task.failureReason = failureMsg
-                memoryManager.logInteraction("Confirm", failureMsg)
+                // 1. Freshness Check: Confirmation must not be expired (max 60 seconds)
+                if (!com.boopathi.bg.service.messaging.MessagingPolicy.isConfirmationFresh(task.confirmationCreatedAt)) {
+                    val expireMsg = "That confirmation expired. Please request again."
+                    task.state = com.boopathi.bg.service.agent.AgentTaskState.FAILED
+                    task.failureReason = expireMsg
+                    memoryManager.logInteraction("Confirm", expireMsg)
+                    return@launch
+                }
+
+                // 2. Draft & Recipient Validation
+                val draft = task.draft
+                if (draft == null || draft.recipient.isBlank() || draft.messageText.isBlank()) {
+                    val err = "Draft details are missing or invalid."
+                    task.state = com.boopathi.bg.service.agent.AgentTaskState.FAILED
+                    task.failureReason = err
+                    memoryManager.logInteraction("Confirm", err)
+                    return@launch
+                }
+
+                // 3. Sensitive / Financial Content Safety
+                if (!com.boopathi.bg.service.messaging.MessagingPolicy.isContentSafeToSend(draft.messageText)) {
+                    val blockedMsg = "I can't send messages containing sensitive authentication or financial information."
+                    task.state = com.boopathi.bg.service.agent.AgentTaskState.BLOCKED
+                    task.failureReason = blockedMsg
+                    memoryManager.logInteraction("Confirm", blockedMsg)
+                    return@launch
+                }
+
+                // 4. Duplicate-Send Prevention: Check if send action already executed for this task
+                if (task.sendExecuted) {
+                    val dupMsg = "Message send action was already attempted. No duplicate send will be executed."
+                    task.state = com.boopathi.bg.service.agent.AgentTaskState.FAILED
+                    task.failureReason = dupMsg
+                    memoryManager.logInteraction("Confirm", dupMsg)
+                    return@launch
+                }
+
+                // 5. Phase 5C Policy Check
+                if (!com.boopathi.bg.service.messaging.MessagingPolicy.isSendingPermitted()) {
+                    val unsupportedMsg = "Message sending is currently disabled by policy."
+                    task.state = com.boopathi.bg.service.agent.AgentTaskState.FAILED
+                    task.failureReason = unsupportedMsg
+                    memoryManager.logInteraction("Confirm", unsupportedMsg)
+                    return@launch
+                }
+
+                // 6. Owner / Device Authentication Gate (BiometricPrompt / Credential challenge)
+                val authResult = ownerAuthGate.authenticate(
+                    title = "Confirm Message Dispatch",
+                    subtitle = "Send message to ${draft.recipient}?"
+                )
+
+                if (!authResult.isSuccess) {
+                    val authFailMsg = when (authResult.status) {
+                        com.boopathi.bg.service.security.AuthResultStatus.CANCELLED -> "Authentication was cancelled. I didn't send the message."
+                        else -> "Authentication failed. I didn't send the message."
+                    }
+                    task.state = com.boopathi.bg.service.agent.AgentTaskState.FAILED
+                    task.failureReason = authFailMsg
+                    memoryManager.logInteraction("Confirm", authFailMsg)
+                    return@launch
+                }
+
+                // 7. Controlled Final Send Action via AppAgent
+                task.sendExecuted = true
+                val sendAction = com.boopathi.bg.service.agent.AppAction.SendMessage(
+                    expectedRecipient = draft.recipient,
+                    expectedMessage = draft.messageText,
+                    targetApp = draft.sourceApp
+                )
+
+                val result = appAgent.executeAction(sendAction)
+                if (result.isSuccess) {
+                    task.state = com.boopathi.bg.service.agent.AgentTaskState.SUCCESS
+                    val successMsg = "Message sent successfully to ${draft.recipient}."
+                    memoryManager.logInteraction("Confirm", successMsg)
+                } else {
+                    task.state = com.boopathi.bg.service.agent.AgentTaskState.FAILED
+                    task.failureReason = result.reason ?: "I couldn't verify that the message was sent."
+                    memoryManager.logInteraction("Confirm", task.failureReason!!)
+                }
             }
         }
     }

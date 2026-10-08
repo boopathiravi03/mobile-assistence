@@ -11,6 +11,7 @@ enum class AppActionType {
     TYPE_TEXT,
     SCROLL,
     BACK,
-    HOME
+    HOME,
+    SEND_MESSAGE
 }
 

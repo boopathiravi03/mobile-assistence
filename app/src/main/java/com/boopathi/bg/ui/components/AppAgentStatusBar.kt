@@ -64,7 +64,14 @@ fun AppAgentStatusBar(
     }
 
     val effectiveStateName = if (currentTask != null && !currentTask.isComplete) {
-        taskState.name
+        when {
+            currentTask.state == AgentTaskState.WAITING_FOR_CONFIRMATION -> "WAITING FOR CONFIRMATION"
+            currentTask.steps.any { it.action is com.boopathi.bg.service.agent.AppAction.SendMessage && it.status == StepStatus.RUNNING } -> "📤 SENDING"
+            currentTask.steps.any { it.action is com.boopathi.bg.service.agent.AppAction.SendMessage && it.status == StepStatus.VERIFYING } -> "🔎 VERIFYING"
+            else -> taskState.name
+        }
+    } else if (currentTask?.state == AgentTaskState.SUCCESS && currentTask.steps.any { it.action is com.boopathi.bg.service.agent.AppAction.SendMessage }) {
+        "✓ MESSAGE SENT"
     } else {
         agentState.name
     }

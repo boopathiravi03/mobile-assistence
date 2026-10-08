@@ -64,7 +64,9 @@ object MessagePreparationTask {
             steps = steps
         )
 
-        // Attach confirmation request to boundary
+        // Attach confirmation request and draft to boundary
+        task.draft = draft
+        task.confirmationCreatedAt = System.currentTimeMillis()
         task.confirmationRequest = ConfirmationRequest(
             reason = "Ready to send message to ${draft.recipient}: '${draft.messageText}' via $app",
             actionDescription = "Send message to ${draft.recipient}",

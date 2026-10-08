@@ -75,10 +75,13 @@ class Phase5BNotificationMessagingTest {
             notificationAccessManager = notifManager,
             messagingTargetResolver = targetResolver
         )
+
+        MessagingPolicy.SENDING_UNSUPPORTED = true
     }
 
     @After
     fun tearDown() {
+        MessagingPolicy.SENDING_UNSUPPORTED = false
         db.close()
     }
 

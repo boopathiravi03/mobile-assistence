@@ -143,6 +143,26 @@ object AgentExecutionPolicy {
                     status = AppActionResultStatus.SUCCESS
                 )
             }
+
+            is AppAction.SendMessage -> {
+                // Inspect content safety first
+                if (!com.boopathi.bg.service.messaging.MessagingPolicy.isContentSafeToSend(action.expectedMessage)) {
+                    return RiskDecision(
+                        level = RiskLevel.HIGH,
+                        isPermitted = false,
+                        status = AppActionResultStatus.BLOCKED,
+                        reason = "Message contains sensitive authentication, credential, or financial content."
+                    )
+                }
+
+                // SendMessage is a consequential MEDIUM risk action that requires confirmation and authentication
+                RiskDecision(
+                    level = RiskLevel.MEDIUM,
+                    isPermitted = false,
+                    status = AppActionResultStatus.REQUIRES_CONFIRMATION,
+                    reason = "Sending message to ${action.expectedRecipient} requires explicit confirmation and owner authentication."
+                )
+            }
         }
     }
 }
