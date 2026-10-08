@@ -1,0 +1,28 @@
+package com.boopathi.bg.service.agent
+
+import java.util.UUID
+
+/**
+ * Strongly typed representation of a user goal decomposed into bounded sequential steps.
+ */
+data class AgentTask(
+    val taskId: String = UUID.randomUUID().toString(),
+    val originalCommand: String,
+    val normalizedGoal: String,
+    val steps: MutableList<AgentStep> = mutableListOf(),
+    var currentStepIndex: Int = 0,
+    var state: AgentTaskState = AgentTaskState.IDLE,
+    val createdAt: Long = System.currentTimeMillis(),
+    var updatedAt: Long = System.currentTimeMillis(),
+    var failureReason: String? = null,
+    var confirmationRequest: ConfirmationRequest? = null
+) {
+    val totalSteps: Int get() = steps.size
+    val currentStep: AgentStep?
+        get() = if (currentStepIndex in steps.indices) steps[currentStepIndex] else null
+    val isComplete: Boolean
+        get() = state == AgentTaskState.SUCCESS || state == AgentTaskState.FAILED ||
+                state == AgentTaskState.CANCELLED || state == AgentTaskState.BLOCKED ||
+                state == AgentTaskState.TIMEOUT
+}
+

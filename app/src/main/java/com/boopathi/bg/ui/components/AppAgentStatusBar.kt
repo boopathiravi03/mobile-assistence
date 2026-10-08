@@ -31,6 +31,10 @@ import com.boopathi.bg.ui.theme.PulseAmber
 import com.boopathi.bg.ui.theme.TextPrimary
 import com.boopathi.bg.ui.theme.TextSecondary
 
+import com.boopathi.bg.service.agent.AgentTask
+import com.boopathi.bg.service.agent.AgentTaskState
+import com.boopathi.bg.service.agent.StepStatus
+
 @Composable
 fun AppAgentStatusBar(
     isAccessibilityEnabled: Boolean,
@@ -38,7 +42,11 @@ fun AppAgentStatusBar(
     currentPackage: String,
     agentState: AppAgentState,
     lastResult: AppActionResult?,
+    currentTask: AgentTask? = null,
+    taskState: AgentTaskState = AgentTaskState.IDLE,
     onOpenSettingsClick: () -> Unit,
+    onCancelTaskClick: () -> Unit = {},
+    onConfirmClick: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val connectionColor = when {
@@ -49,20 +57,26 @@ fun AppAgentStatusBar(
 
     val connectionLabel = when {
         isAccessibilityConnected -> "CONNECTED"
-        isAccessibilityEnabled -> "ENABLED (STANDBY)"
+        isAccessibilityEnabled -> "STANDBY"
         else -> "DISABLED"
     }
 
-    val stateColor = when (agentState) {
-        AppAgentState.IDLE -> TextSecondary
-        AppAgentState.PLANNING -> ElectricBlue
-        AppAgentState.EXECUTING -> NeonCyan
-        AppAgentState.VERIFYING -> PulseAmber
-        AppAgentState.SUCCESS -> Color(0xFF00E676)
-        AppAgentState.FAILED -> Color(0xFFFF5252)
-        AppAgentState.BLOCKED -> Color(0xFFFF1744)
-        AppAgentState.REQUIRES_CONFIRMATION -> PulseAmber
-        AppAgentState.WAITING_FOR_ACCESSIBILITY -> PulseAmber
+    val effectiveStateName = if (currentTask != null && !currentTask.isComplete) {
+        taskState.name
+    } else {
+        agentState.name
+    }
+
+    val stateColor = when {
+        taskState == AgentTaskState.EXECUTING || agentState == AppAgentState.EXECUTING -> NeonCyan
+        taskState == AgentTaskState.VERIFYING || agentState == AppAgentState.VERIFYING -> PulseAmber
+        taskState == AgentTaskState.PLANNING || agentState == AppAgentState.PLANNING -> ElectricBlue
+        taskState == AgentTaskState.SUCCESS || agentState == AppAgentState.SUCCESS -> Color(0xFF00E676)
+        taskState == AgentTaskState.FAILED || agentState == AppAgentState.FAILED -> Color(0xFFFF5252)
+        taskState == AgentTaskState.BLOCKED || agentState == AppAgentState.BLOCKED -> Color(0xFFFF1744)
+        taskState == AgentTaskState.CANCELLED -> Color(0xFFFF9100)
+        taskState == AgentTaskState.WAITING_FOR_CONFIRMATION -> PulseAmber
+        else -> TextSecondary
     }
 
     Column(
@@ -73,6 +87,7 @@ fun AppAgentStatusBar(
             .border(1.dp, Color(0xFF1E293B), RoundedCornerShape(10.dp))
             .padding(horizontal = 12.dp, vertical = 8.dp)
     ) {
+        // Top status row
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
@@ -90,7 +105,7 @@ fun AppAgentStatusBar(
                     fontWeight = FontWeight.Bold
                 )
                 Text(
-                    text = agentState.name,
+                    text = effectiveStateName,
                     color = stateColor,
                     fontSize = 11.sp,
                     fontFamily = FontFamily.Monospace,
@@ -128,7 +143,104 @@ fun AppAgentStatusBar(
             }
         }
 
-        if (currentPackage.isNotEmpty() || lastResult != null) {
+        // Active Multi-Step Task Progress Section
+        if (currentTask != null && (!currentTask.isComplete || taskState == AgentTaskState.WAITING_FOR_CONFIRMATION)) {
+            Spacer(modifier = Modifier.height(6.dp))
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(Color(0xFF070B14))
+                    .padding(8.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "Task: ${currentTask.normalizedGoal}",
+                        color = TextPrimary,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+
+                    Text(
+                        text = "Step ${currentTask.currentStepIndex + 1}/${currentTask.totalSteps}",
+                        color = NeonCyan,
+                        fontSize = 10.sp,
+                        fontFamily = FontFamily.Monospace
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(4.dp))
+
+                // Steps list view
+                currentTask.steps.forEachIndexed { idx, step ->
+                    val stepIcon = when (step.status) {
+                        StepStatus.SUCCESS -> "✓"
+                        StepStatus.RUNNING, StepStatus.VERIFYING -> "●"
+                        StepStatus.RETRYING -> "↻"
+                        StepStatus.FAILED -> "✗"
+                        StepStatus.BLOCKED -> "⛔"
+                        StepStatus.WAITING_FOR_CONFIRMATION -> "⚠️"
+                        else -> "○"
+                    }
+                    val stepColor = when (step.status) {
+                        StepStatus.SUCCESS -> Color(0xFF00E676)
+                        StepStatus.RUNNING -> NeonCyan
+                        StepStatus.FAILED, StepStatus.BLOCKED -> Color(0xFFFF5252)
+                        StepStatus.WAITING_FOR_CONFIRMATION -> PulseAmber
+                        else -> TextSecondary
+                    }
+
+                    Text(
+                        text = "$stepIcon ${step.description}",
+                        color = stepColor,
+                        fontSize = 10.sp,
+                        fontFamily = FontFamily.Monospace
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(6.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    if (taskState == AgentTaskState.WAITING_FOR_CONFIRMATION) {
+                        Text(
+                            text = "✓ CONFIRM",
+                            color = Color(0xFF00E676),
+                            fontSize = 10.sp,
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(4.dp))
+                                .background(Color(0xFF00E676).copy(alpha = 0.2f))
+                                .border(1.dp, Color(0xFF00E676), RoundedCornerShape(4.dp))
+                                .clickable { onConfirmClick() }
+                                .padding(horizontal = 8.dp, vertical = 3.dp)
+                        )
+                        Spacer(modifier = Modifier.size(8.dp))
+                    }
+
+                    Text(
+                        text = "⏹ STOP",
+                        color = Color(0xFFFF5252),
+                        fontSize = 10.sp,
+                        fontFamily = FontFamily.Monospace,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(4.dp))
+                            .background(Color(0xFFFF5252).copy(alpha = 0.2f))
+                            .border(1.dp, Color(0xFFFF5252), RoundedCornerShape(4.dp))
+                            .clickable { onCancelTaskClick() }
+                            .padding(horizontal = 8.dp, vertical = 3.dp)
+                    )
+                }
+            }
+        } else if (currentPackage.isNotEmpty() || lastResult != null) {
             Spacer(modifier = Modifier.height(4.dp))
             Row(
                 modifier = Modifier.fillMaxWidth(),

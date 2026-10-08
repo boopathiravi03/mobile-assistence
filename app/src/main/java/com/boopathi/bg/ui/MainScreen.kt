@@ -53,6 +53,8 @@ fun MainScreen(
     val currentForegroundPackage by viewModel.currentForegroundPackage.collectAsState()
     val appAgentState by viewModel.appAgentState.collectAsState()
     val lastAppActionResult by viewModel.lastAppActionResult.collectAsState()
+    val currentTask by viewModel.currentTask.collectAsState()
+    val taskState by viewModel.taskState.collectAsState()
 
     if (showProfileDialog) {
         com.boopathi.bg.ui.components.OwnerProfileDialog(
@@ -83,14 +85,18 @@ fun MainScreen(
                 onProfileClick = { viewModel.openProfile() }
             )
 
-            // Phase 4 App Agent Status Bar
+            // Phase 4 & Phase 5A App Agent Status Bar
             com.boopathi.bg.ui.components.AppAgentStatusBar(
                 isAccessibilityEnabled = isAccessibilityEnabled,
                 isAccessibilityConnected = isAccessibilityConnected,
                 currentPackage = currentForegroundPackage,
                 agentState = appAgentState,
                 lastResult = lastAppActionResult,
+                currentTask = currentTask,
+                taskState = taskState,
                 onOpenSettingsClick = { viewModel.openAccessibilitySettings() },
+                onCancelTaskClick = { viewModel.cancelTask() },
+                onConfirmClick = { viewModel.confirmAction() },
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 16.dp, vertical = 4.dp)

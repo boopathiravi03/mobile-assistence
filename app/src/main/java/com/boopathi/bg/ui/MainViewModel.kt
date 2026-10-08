@@ -49,9 +49,10 @@ class MainViewModel @JvmOverloads constructor(
         register(GoHomeTool(application))
     }
 
-    // Phase 4 Controlled App Agent & Accessibility Bridge
+    // Phase 4 & Phase 5A Controlled App Agent & Bounded Multi-Step Engine
     val accessibilityBridge: AccessibilityBridge = customAccessibilityBridge ?: AndroidAccessibilityBridge(application)
     val appAgent: AppAgent = AppAgent(bridge = accessibilityBridge, toolRegistry = toolRegistry)
+    val multiStepAgent: com.boopathi.bg.service.agent.MultiStepAgent = com.boopathi.bg.service.agent.MultiStepAgent(appAgent = appAgent)
 
     // Dependency injection / Clean architecture
     val memoryManager: MemoryManager = customMemoryManager ?: RoomMemoryManager(
@@ -61,7 +62,8 @@ class MainViewModel @JvmOverloads constructor(
     private val commandProcessor: CommandProcessor = CommandProcessor(
         memoryManager = memoryManager,
         toolRegistry = toolRegistry,
-        appAgent = appAgent
+        appAgent = appAgent,
+        multiStepAgent = multiStepAgent
     )
 
     private var voiceManager: VoiceManager? = null
@@ -73,6 +75,9 @@ class MainViewModel @JvmOverloads constructor(
 
     val appAgentState: StateFlow<AppAgentState> = appAgent.state
     val lastAppActionResult: StateFlow<AppActionResult?> = appAgent.lastResult
+
+    val currentTask: StateFlow<com.boopathi.bg.service.agent.AgentTask?> = multiStepAgent.currentTask
+    val taskState: StateFlow<com.boopathi.bg.service.agent.AgentTaskState> = multiStepAgent.taskState
 
     private val _isAccessibilityEnabled = MutableStateFlow(false)
     val isAccessibilityEnabled: StateFlow<Boolean> = _isAccessibilityEnabled.asStateFlow()
@@ -224,6 +229,23 @@ class MainViewModel @JvmOverloads constructor(
                 val result = commandProcessor.processCommand(commandText)
                 _lastToolResult.value = result.toolResult
                 refreshProfileAndStats()
+            }
+        }
+    }
+
+    fun cancelTask() {
+        multiStepAgent.cancelCurrentTask("Cancelled by user via UI")
+    }
+
+    fun confirmAction() {
+        val task = multiStepAgent.currentTask.value
+        if (task != null && task.state == com.boopathi.bg.service.agent.AgentTaskState.WAITING_FOR_CONFIRMATION) {
+            // For Phase 5A security boundary: messaging SEND action returns UNSUPPORTED
+            viewModelScope.launch {
+                val failureMsg = "Actual message sending / mutation is not supported in Phase 5A."
+                task.state = com.boopathi.bg.service.agent.AgentTaskState.FAILED
+                task.failureReason = failureMsg
+                memoryManager.logInteraction("Confirm", failureMsg)
             }
         }
     }

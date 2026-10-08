@@ -37,7 +37,7 @@ import org.junit.runner.RunWith
 /**
  * Fake implementation of AccessibilityBridge for fast, deterministic unit and JVM testing.
  */
-class FakeAccessibilityBridge(
+open class FakeAccessibilityBridge(
     var serviceEnabled: Boolean = true,
     var connected: Boolean = true,
     var currentPkg: String = "com.boopathi.bg",
@@ -50,7 +50,7 @@ class FakeAccessibilityBridge(
     override fun isConnected(): Boolean = connected
     override fun getCurrentPackage(): String = currentPkg
 
-    override suspend fun getVisibleElements(): List<UiElementInfo> = mockElements.toList()
+    open override suspend fun getVisibleElements(): List<UiElementInfo> = mockElements.toList()
 
     override suspend fun findByText(query: String, normalized: Boolean): List<UiElementInfo> {
         return mockElements.filter { it.matchesQuery(query, normalized) }
@@ -64,27 +64,27 @@ class FakeAccessibilityBridge(
         return mockElements.filter { it.viewId.contains(viewId, ignoreCase = true) }
     }
 
-    override suspend fun click(element: UiElementInfo): Boolean {
+    open override suspend fun click(element: UiElementInfo): Boolean {
         executedActions.add("click:${element.displayLabel}")
         return element.isClickable && element.isEnabled
     }
 
-    override suspend fun typeText(element: UiElementInfo, text: String): Boolean {
+    open override suspend fun typeText(element: UiElementInfo, text: String): Boolean {
         executedActions.add("type:${element.displayLabel}:$text")
         return element.isEditable && element.isEnabled
     }
 
-    override suspend fun scroll(direction: ScrollDirection): Boolean {
+    open override suspend fun scroll(direction: ScrollDirection): Boolean {
         executedActions.add("scroll:${direction.name}")
         return true
     }
 
-    override suspend fun pressBack(): Boolean {
+    open override suspend fun pressBack(): Boolean {
         executedActions.add("back")
         return true
     }
 
-    override suspend fun pressHome(): Boolean {
+    open override suspend fun pressHome(): Boolean {
         executedActions.add("home")
         return true
     }

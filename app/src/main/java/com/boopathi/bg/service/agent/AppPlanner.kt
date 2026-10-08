@@ -6,6 +6,23 @@ package com.boopathi.bg.service.agent
  */
 class AppPlanner {
 
+    private fun formatAppTitle(name: String): String {
+        return when (name.lowercase()) {
+            "youtube" -> "YouTube"
+            "whatsapp" -> "WhatsApp"
+            "settings" -> "Settings"
+            "camera" -> "Camera"
+            "chrome" -> "Chrome"
+            "maps" -> "Maps"
+            "gmail" -> "Gmail"
+            else -> name.split(" ").joinToString(" ") { it.replaceFirstChar { c -> c.uppercase() } }
+        }
+    }
+
+    private fun formatTargetTitle(target: String): String {
+        return target.replaceFirstChar { it.uppercase() }
+    }
+
     fun createPlan(userSpeech: String): AppPlan? {
         val clean = userSpeech.trim().lowercase()
             .removeSuffix(".")
@@ -15,16 +32,150 @@ class AppPlanner {
 
         if (clean.isEmpty()) return null
 
-        // 1. COMPOUND: "Open <app> and inspect the screen" / "<app> open pannu screen-la enna irukku sollu"
-        val compoundMatch = Regex("^(?:open|launch)\\s+([a-z0-9\\s]+?)\\s+and\\s+(?:inspect|read)\\s+(?:the\\s+)?screen$", RegexOption.IGNORE_CASE).matchEntire(clean)
-        if (compoundMatch != null) {
-            val app = compoundMatch.groupValues[1].trim()
+        // 1. MULTI-STEP COMPOUND PATTERNS:
+        // Pattern 1A: "Open <app> and tap <target>" / "Launch <app> and click <target>"
+        // Tanglish: "<app> open panni <target> button-a tap pannu" / "<app> open panni <target> tap pannu"
+        val openAndTapEnglish = Regex("^(?:open|launch)\\s+([a-z0-9\\s]+?)\\s+and\\s+(?:tap|click|press)(?:\\s+on)?\\s+(.+)$", RegexOption.IGNORE_CASE).matchEntire(clean)
+        if (openAndTapEnglish != null) {
+            val app = openAndTapEnglish.groupValues[1].trim()
+            val target = openAndTapEnglish.groupValues[2].trim().removeSuffix(" button").trim()
+            if (isValidTarget(target)) {
+                val appTitle = formatAppTitle(app)
+                val targetTitle = formatTargetTitle(target)
+                return AppPlan(
+                    goal = "Open $appTitle and tap $targetTitle",
+                    actions = listOf(
+                        AppAction.OpenApp(appTitle),
+                        AppAction.WaitForWindow(app, timeoutMs = 6000L),
+                        AppAction.InspectUi,
+                        AppAction.Tap(targetTitle)
+                    )
+                )
+            }
+        }
+
+        val openAndTapTanglish = listOf(
+            Regex("^(.+?)\\s+open\\s+panni\\s+(.+?)\\s+button-a\\s+tap\\s+pannu$", RegexOption.IGNORE_CASE),
+            Regex("^(.+?)\\s+open\\s+panni\\s+(.+?)\\s+tap\\s+pannu$", RegexOption.IGNORE_CASE),
+            Regex("^(.+?)\\s+open\\s+panni\\s+(.+?)\\s+click\\s+pannu$", RegexOption.IGNORE_CASE),
+            Regex("^(.+?)\\s+open\\s+pannitu\\s+(.+?)\\s+button-a\\s+tap\\s+pannu$", RegexOption.IGNORE_CASE),
+            Regex("^(.+?)\\s+open\\s+pannitu\\s+(.+?)\\s+tap\\s+pannu$", RegexOption.IGNORE_CASE)
+        )
+        for (pattern in openAndTapTanglish) {
+            val match = pattern.matchEntire(clean)
+            if (match != null) {
+                val app = match.groupValues[1].trim()
+                val target = match.groupValues[2].trim().removeSuffix(" button").trim()
+                if (isValidTarget(target)) {
+                    val appTitle = formatAppTitle(app)
+                    val targetTitle = formatTargetTitle(target)
+                    return AppPlan(
+                        goal = "Open $appTitle and tap $targetTitle",
+                        actions = listOf(
+                            AppAction.OpenApp(appTitle),
+                            AppAction.WaitForWindow(app, timeoutMs = 6000L),
+                            AppAction.InspectUi,
+                            AppAction.Tap(targetTitle)
+                        )
+                    )
+                }
+            }
+        }
+
+        // Pattern 1B: "Open <app> and inspect the screen" / "<app> open panni screen inspect pannu"
+        val compoundInspectEnglish = Regex("^(?:open|launch)\\s+([a-z0-9\\s]+?)\\s+and\\s+(?:inspect|read)\\s+(?:the\\s+)?screen$", RegexOption.IGNORE_CASE).matchEntire(clean)
+        if (compoundInspectEnglish != null) {
+            val app = compoundInspectEnglish.groupValues[1].trim()
+            val appTitle = formatAppTitle(app)
             return AppPlan(
-                goal = "Open $app and inspect screen",
+                goal = "Open $appTitle and inspect screen",
                 actions = listOf(
-                    AppAction.OpenApp(app),
+                    AppAction.OpenApp(appTitle),
                     AppAction.WaitForWindow(app, timeoutMs = 6000L),
                     AppAction.InspectUi
+                )
+            )
+        }
+
+        val compoundInspectTanglish = listOf(
+            Regex("^(.+?)\\s+open\\s+panni\\s+(?:the\\s+)?screen(?:-a)?\\s+(?:inspect|padikavum|sollu).*$", RegexOption.IGNORE_CASE),
+            Regex("^(.+?)\\s+open\\s+panni\\s+screen-la\\s+enna\\s+irukku\\s+sollu$", RegexOption.IGNORE_CASE),
+            Regex("^(.+?)\\s+open\\s+pannitu\\s+screen\\s+inspect\\s+pannu$", RegexOption.IGNORE_CASE)
+        )
+        for (pattern in compoundInspectTanglish) {
+            val match = pattern.matchEntire(clean)
+            if (match != null) {
+                val app = match.groupValues[1].trim()
+                val appTitle = formatAppTitle(app)
+                return AppPlan(
+                    goal = "Open $appTitle and inspect screen",
+                    actions = listOf(
+                        AppAction.OpenApp(appTitle),
+                        AppAction.WaitForWindow(app, timeoutMs = 6000L),
+                        AppAction.InspectUi
+                    )
+                )
+            }
+        }
+
+        // Pattern 1C: "Go to Settings and open <option>" / "Settings open panni <option> open pannu"
+        val settingsSubOption = Regex("^(?:go to |open )?settings\\s+and\\s+open\\s+(.+)$", RegexOption.IGNORE_CASE).matchEntire(clean)
+        if (settingsSubOption != null) {
+            val option = settingsSubOption.groupValues[1].trim()
+            val optionTitle = formatTargetTitle(option)
+            return AppPlan(
+                goal = "Open Settings and tap $optionTitle",
+                actions = listOf(
+                    AppAction.OpenApp("Settings"),
+                    AppAction.WaitForWindow("settings", timeoutMs = 6000L),
+                    AppAction.InspectUi,
+                    AppAction.Tap(optionTitle)
+                )
+            )
+        }
+
+        val settingsSubOptionTanglish = Regex("^settings\\s+open\\s+panni\\s+(.+?)\\s+open\\s+pannu$", RegexOption.IGNORE_CASE).matchEntire(clean)
+        if (settingsSubOptionTanglish != null) {
+            val option = settingsSubOptionTanglish.groupValues[1].trim()
+            val optionTitle = formatTargetTitle(option)
+            return AppPlan(
+                goal = "Open Settings and tap $optionTitle",
+                actions = listOf(
+                    AppAction.OpenApp("Settings"),
+                    AppAction.WaitForWindow("settings", timeoutMs = 6000L),
+                    AppAction.InspectUi,
+                    AppAction.Tap(optionTitle)
+                )
+            )
+        }
+
+        // Pattern 1D: "Open <app> and scroll down" / "<app> open panni keela scroll pannu"
+        val openAndScrollEnglish = Regex("^(?:open|launch)\\s+([a-z0-9\\s]+?)\\s+and\\s+scroll\\s+(down|up)$", RegexOption.IGNORE_CASE).matchEntire(clean)
+        if (openAndScrollEnglish != null) {
+            val app = openAndScrollEnglish.groupValues[1].trim()
+            val appTitle = formatAppTitle(app)
+            val direction = if (openAndScrollEnglish.groupValues[2].equals("up", ignoreCase = true)) ScrollDirection.UP else ScrollDirection.DOWN
+            return AppPlan(
+                goal = "Open $appTitle and scroll ${direction.name.lowercase()}",
+                actions = listOf(
+                    AppAction.OpenApp(appTitle),
+                    AppAction.WaitForWindow(app, timeoutMs = 6000L),
+                    AppAction.Scroll(direction)
+                )
+            )
+        }
+
+        val openAndScrollTanglish = Regex("^(.+?)\\s+open\\s+panni\\s+(keela|mela)\\s+scroll\\s+pannu$", RegexOption.IGNORE_CASE).matchEntire(clean)
+        if (openAndScrollTanglish != null) {
+            val app = openAndScrollTanglish.groupValues[1].trim()
+            val appTitle = formatAppTitle(app)
+            val direction = if (openAndScrollTanglish.groupValues[2].equals("mela", ignoreCase = true)) ScrollDirection.UP else ScrollDirection.DOWN
+            return AppPlan(
+                goal = "Open $appTitle and scroll ${direction.name.lowercase()}",
+                actions = listOf(
+                    AppAction.OpenApp(appTitle),
+                    AppAction.WaitForWindow(app, timeoutMs = 6000L),
+                    AppAction.Scroll(direction)
                 )
             )
         }
@@ -181,6 +332,32 @@ class AppPlanner {
         }
 
         return null
+    }
+
+    fun createTask(userSpeech: String): AgentTask? {
+        val plan = createPlan(userSpeech) ?: return null
+        val steps = plan.actions.mapIndexed { idx, action ->
+            val description = when (action) {
+                is AppAction.OpenApp -> "Open ${action.appName}"
+                is AppAction.WaitForWindow -> "Wait for ${action.expectedPackage} window"
+                is AppAction.InspectUi -> "Inspect visible screen"
+                is AppAction.Tap -> "Tap '${action.targetQuery}'"
+                is AppAction.TypeText -> "Type '${action.textToType}' into '${action.targetQuery}'"
+                is AppAction.Scroll -> "Scroll ${action.direction.name.lowercase()}"
+                is AppAction.Back -> "Navigate Back"
+                is AppAction.Home -> "Navigate Home"
+            }
+            AgentStep(
+                action = action,
+                description = description
+            )
+        }.toMutableList()
+
+        return AgentTask(
+            originalCommand = userSpeech,
+            normalizedGoal = plan.goal,
+            steps = steps
+        )
     }
 
     private fun isValidTarget(target: String): Boolean {

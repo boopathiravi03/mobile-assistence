@@ -21,7 +21,8 @@ class CommandProcessor(
     private val groqProvider: AIProvider = GroqProvider(),
     private val ownerVerificationService: OwnerVerificationService = DefaultOwnerVerificationService(),
     val toolRegistry: ToolRegistry? = null,
-    val appAgent: com.boopathi.bg.service.agent.AppAgent? = null
+    val appAgent: com.boopathi.bg.service.agent.AppAgent? = null,
+    val multiStepAgent: com.boopathi.bg.service.agent.MultiStepAgent? = null
 ) {
 
     companion object {
@@ -61,11 +62,24 @@ class CommandProcessor(
             )
         }
 
+        // Priority 0: Explicit Cancellation Command ("Stop", "Cancel", "BG stop", "Cancel task", "Stop pannu", "BG niruthu")
+        val lowerClean = trimmed.lowercase().removeSuffix(".").removeSuffix("!").trim()
+        if (lowerClean in listOf("stop", "cancel", "bg stop", "cancel task", "stop task", "stop pannu", "cancel pannu", "bg niruthu", "niruthu")) {
+            val cancelled = multiStepAgent?.cancelCurrentTask("Cancelled by user request") ?: false
+            val cancelMsg = if (cancelled) "Task stopped." else "No active task running."
+            return CommandResult(
+                textResponse = cancelMsg,
+                providerName = "MultiStepAgent",
+                isSuccess = true
+            )
+        }
+
         // Routing Hierarchy:
         // Priority 1: Deterministic Memory, Note, or Task commands
         val memoryCommandResult = handleMemoryOrTaskCommand(trimmed, owner)
-        // Priority 1.5: Deterministic App Agent commands (UI inspection, controlled tap, scroll, back, home, compound app plans)
-        val appPlan = appAgent?.planner?.createPlan(trimmed)
+        // Priority 1.5: Multi-step App Agent task decomposition & execution
+        val planner = multiStepAgent?.appAgent?.planner ?: appAgent?.planner
+        val agentTask = planner?.createTask(trimmed)
         val toolIntent = ToolIntentDetector.detectIntent(trimmed)
 
         val result = if (memoryCommandResult != null) {
@@ -75,17 +89,36 @@ class CommandProcessor(
             // Priority 1 (continued): Standard local conversational commands (time, date, greeting, identity)
             Log.d(TAG, "Router: Matched local deterministic command -> LocalProvider")
             localProvider.processCommand(trimmed, owner)
-        } else if (appPlan != null && appAgent != null) {
-            // Priority 2: Controlled App Agent Action / Plan
-            Log.d(TAG, "Router: Matched AppAgent plan -> ${appPlan.goal} (${appPlan.size} actions)")
-            val agentResult = appAgent.executePlan(appPlan)
-            val responseText = formatAppAgentResponse(agentResult, appPlan, owner)
+        } else if (agentTask != null && multiStepAgent != null) {
+            // Priority 2: Bounded Multi-Step Controlled App Agent
+            Log.d(TAG, "Router: Matched MultiStepAgent task -> ${agentTask.normalizedGoal} (${agentTask.totalSteps} steps)")
+            val executedTask = multiStepAgent.executeTask(agentTask)
+            val responseText = formatAgentTaskResponse(executedTask, owner)
             CommandResult(
                 textResponse = responseText,
-                providerName = "AppAgent",
-                isSuccess = agentResult.isSuccess,
-                appActionResult = agentResult
+                providerName = "MultiStepAgent",
+                isSuccess = executedTask.state == com.boopathi.bg.service.agent.AgentTaskState.SUCCESS,
+                agentTask = executedTask
             )
+        } else if (agentTask != null && appAgent != null) {
+            // Priority 2 (fallback): Single plan execution via AppAgent
+            val appPlan = planner?.createPlan(trimmed)
+            if (appPlan != null) {
+                val agentResult = appAgent.executePlan(appPlan)
+                val responseText = formatAppAgentResponse(agentResult, appPlan, owner)
+                CommandResult(
+                    textResponse = responseText,
+                    providerName = "AppAgent",
+                    isSuccess = agentResult.isSuccess,
+                    appActionResult = agentResult
+                )
+            } else {
+                CommandResult(
+                    textResponse = "Unable to plan action.",
+                    providerName = "AppAgent",
+                    isSuccess = false
+                )
+            }
         } else if (toolIntent != null) {
             // Priority 3: Direct Android Tool command
             Log.d(TAG, "Command: \"$trimmed\" | Intent: ${toolIntent.toolName} | Params: ${toolIntent.parameters}")
@@ -417,6 +450,9 @@ class CommandProcessor(
             com.boopathi.bg.service.agent.AppActionResultStatus.UNAVAILABLE -> {
                 result.reason ?: "Requested target is unavailable."
             }
+            com.boopathi.bg.service.agent.AppActionResultStatus.REQUIRES_CLARIFICATION -> {
+                "${owner.name}, ${result.reason ?: "Multiple matching options found. Please clarify which one you mean."}"
+            }
             com.boopathi.bg.service.agent.AppActionResultStatus.FAILED -> {
                 result.reason ?: "Action failed on '${result.targetDescription}'."
             }
@@ -458,6 +494,42 @@ class CommandProcessor(
                         "Completed: ${plan.goal}."
                     }
                 }
+            }
+        }
+    }
+
+    private fun formatAgentTaskResponse(
+        task: com.boopathi.bg.service.agent.AgentTask,
+        owner: OwnerProfile
+    ): String {
+        return when (task.state) {
+            com.boopathi.bg.service.agent.AgentTaskState.SUCCESS -> {
+                "Completed task: ${task.normalizedGoal} (${task.totalSteps} steps verified)."
+            }
+            com.boopathi.bg.service.agent.AgentTaskState.BLOCKED -> {
+                "Task blocked by safety policy. ${task.failureReason ?: "Sensitive security controls cannot be automated."}"
+            }
+            com.boopathi.bg.service.agent.AgentTaskState.WAITING_FOR_CONFIRMATION -> {
+                val req = task.confirmationRequest
+                "Confirmation required: ${req?.reason ?: "Potentially sensitive action (${req?.actionDescription})."} Proceed?"
+            }
+            com.boopathi.bg.service.agent.AgentTaskState.CANCELLED -> {
+                "Task '${task.normalizedGoal}' was cancelled at step ${task.currentStepIndex + 1}."
+            }
+            com.boopathi.bg.service.agent.AgentTaskState.TIMEOUT -> {
+                "Task timed out: ${task.failureReason ?: "Maximum execution time exceeded."}"
+            }
+            com.boopathi.bg.service.agent.AgentTaskState.WAITING_FOR_ACCESSIBILITY -> {
+                "App Control permission is not enabled. Please enable BG in Accessibility settings first."
+            }
+            com.boopathi.bg.service.agent.AgentTaskState.PAUSED -> {
+                "${owner.name}, ${task.failureReason ?: "Clarification needed to proceed."}"
+            }
+            com.boopathi.bg.service.agent.AgentTaskState.FAILED -> {
+                "Task failed at step ${task.currentStepIndex + 1}/${task.totalSteps}: ${task.failureReason ?: "Verification failed."}"
+            }
+            else -> {
+                "Task status: ${task.state}."
             }
         }
     }

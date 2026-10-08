@@ -9,5 +9,6 @@ data class CommandResult(
     val providerName: String,
     val isSuccess: Boolean = true,
     val toolResult: ToolResult? = null,
-    val appActionResult: AppActionResult? = null
+    val appActionResult: AppActionResult? = null,
+    val agentTask: com.boopathi.bg.service.agent.AgentTask? = null
 )

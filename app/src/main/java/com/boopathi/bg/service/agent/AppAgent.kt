@@ -173,9 +173,28 @@ class AppAgent(
                     )
                 }
 
+                // Ambiguity Check: If multiple interactive candidates exist with distinctly different labels and no exact match
+                val exactMatches = elements.filter {
+                    it.text.equals(action.targetQuery, ignoreCase = true) ||
+                    it.contentDescription.equals(action.targetQuery, ignoreCase = true)
+                }
+                val candidates = if (exactMatches.isNotEmpty()) exactMatches else elements
+                val distinctLabels = candidates.map { it.displayLabel }.distinct()
+
+                if (exactMatches.isEmpty() && distinctLabels.size > 1) {
+                    val candidateSummary = distinctLabels.take(3).joinToString(", ")
+                    return@withContext AppActionResult(
+                        actionType = action.type,
+                        status = AppActionResultStatus.REQUIRES_CLARIFICATION,
+                        targetDescription = action.targetDescription,
+                        reason = "Multiple matching options found ($candidateSummary). Please clarify which one you mean.",
+                        executionDurationMs = System.currentTimeMillis() - startTime
+                    )
+                }
+
                 // Pick first actionable element or first matched element
-                val target = elements.firstOrNull { it.isClickable && it.isEnabled }
-                    ?: elements.first()
+                val target = candidates.firstOrNull { it.isClickable && it.isEnabled }
+                    ?: candidates.first()
 
                 if (!target.isEnabled) {
                     return@withContext AppActionResult(

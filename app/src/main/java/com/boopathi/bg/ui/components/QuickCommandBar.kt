@@ -28,6 +28,12 @@ fun QuickCommandBar(
     modifier: Modifier = Modifier
 ) {
     val quickCommands = listOf(
+        "Open YouTube and inspect the screen",
+        "YouTube open panni Search button-a tap pannu",
+        "Open YouTube and tap Search",
+        "Settings open panni Wi-Fi open pannu",
+        "Stop",
+        "Stop pannu",
         "Open Settings",
         "Inspect this screen",
         "Screen-la enna irukku sollu",

@@ -8,7 +8,8 @@ enum class AppActionResultStatus {
     BLOCKED,
     REQUIRES_CONFIRMATION,
     TIMEOUT,
-    REQUIRES_ACCESSIBILITY
+    REQUIRES_ACCESSIBILITY,
+    REQUIRES_CLARIFICATION
 }
 
 data class AppActionResult(
