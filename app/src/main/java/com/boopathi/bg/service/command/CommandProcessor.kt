@@ -24,7 +24,9 @@ class CommandProcessor(
     val appAgent: com.boopathi.bg.service.agent.AppAgent? = null,
     val multiStepAgent: com.boopathi.bg.service.agent.MultiStepAgent? = null,
     val notificationAccessManager: com.boopathi.bg.service.notification.NotificationAccessManager? = null,
-    val messagingTargetResolver: com.boopathi.bg.service.messaging.MessagingTargetResolver = com.boopathi.bg.service.messaging.MessagingTargetResolver()
+    val messagingTargetResolver: com.boopathi.bg.service.messaging.MessagingTargetResolver = com.boopathi.bg.service.messaging.MessagingTargetResolver(),
+    val agentPlanner: com.boopathi.bg.service.planner.AgentPlanner? = null,
+    val agentPlanExecutor: com.boopathi.bg.service.planner.AgentPlanExecutor? = null
 ) {
 
     companion object {
@@ -159,7 +161,22 @@ class CommandProcessor(
             val history = memoryManager.getRecentContext(maxTurns = 5)
             val relevantMemories = memoryManager.findRelevantMemories(trimmed)
 
-            if (geminiProvider.isAvailable) {
+            // Priority 4: Dynamic Agent Planner & Task Planning Engine
+            val dynamicPlanner = agentPlanner ?: com.boopathi.bg.service.planner.AgentPlanner(
+                aiProvider = if (geminiProvider.isAvailable) geminiProvider else if (groqProvider.isAvailable) groqProvider else null
+            )
+            val dynamicExecutor = agentPlanExecutor ?: com.boopathi.bg.service.planner.AgentPlanExecutor(
+                appAgent = appAgent,
+                multiStepAgent = multiStepAgent,
+                toolRegistry = toolRegistry,
+                notificationAccessManager = notificationAccessManager
+            )
+
+            val proposedPlan = dynamicPlanner.createDeterministicLocalPlan(trimmed)
+            if (proposedPlan != null) {
+                Log.d(TAG, "Router: Executing dynamic plan via AgentPlanExecutor: ${proposedPlan.goal.normalizedGoal}")
+                dynamicExecutor.executePlan(proposedPlan, owner)
+            } else if (geminiProvider.isAvailable) {
                 Log.d(TAG, "Router: Routing natural language query to Gemini AI (context turns: ${history.size / 2}, relevant memories: ${relevantMemories.size})")
                 val geminiResult = geminiProvider.processCommand(trimmed, owner, history, relevantMemories)
                 if (geminiResult.isSuccess) {
