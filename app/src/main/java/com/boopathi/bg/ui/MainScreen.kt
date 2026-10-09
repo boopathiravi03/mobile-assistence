@@ -59,6 +59,7 @@ fun MainScreen(
     val currentWorkflow by viewModel.currentWorkflow.collectAsState()
     val workflowStatus by viewModel.workflowStatus.collectAsState()
     val workflowProgressMessage by viewModel.workflowProgressMessage.collectAsState()
+    val workflowHistoryList by viewModel.workflowHistoryFlow.collectAsState(initial = emptyList())
 
     if (showProfileDialog) {
         com.boopathi.bg.ui.components.OwnerProfileDialog(
@@ -89,7 +90,7 @@ fun MainScreen(
                 onProfileClick = { viewModel.openProfile() }
             )
 
-            // Phase 4 & Phase 5A & 5B & 6C App Agent & Workflow Status Bar
+            // Phase 4 & Phase 5A & 5B & 6C & 6D App Agent & Workflow Status Bar
             com.boopathi.bg.ui.components.AppAgentStatusBar(
                 isAccessibilityEnabled = isAccessibilityEnabled,
                 isAccessibilityConnected = isAccessibilityConnected,
@@ -101,7 +102,10 @@ fun MainScreen(
                 currentWorkflow = currentWorkflow,
                 workflowStatus = workflowStatus,
                 workflowProgressMessage = workflowProgressMessage,
+                workflowHistoryList = workflowHistoryList,
                 notificationStatus = notificationStatus,
+                onResumeWorkflowClick = { id -> viewModel.resumeWorkflow(id) },
+                onDismissWorkflowClick = { id -> viewModel.dismissWorkflowHistory(id) },
                 onOpenSettingsClick = { viewModel.openAccessibilitySettings() },
                 onOpenNotificationSettingsClick = { viewModel.openNotificationSettings() },
                 onCancelTaskClick = { viewModel.cancelTask() },

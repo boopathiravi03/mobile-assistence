@@ -70,9 +70,8 @@ data class WorkflowContext(
 
     companion object {
         private val SENSITIVE_PATTERNS = listOf(
-            Regex("(?i)\\b(password|passcode|pin|otp|cvv|cvc)\\b"),
-            Regex("(?i)\\b(secret|private key|bearer token)\\b"),
-            Regex("(?i)(password|passcode|secret)\\d+"),              // e.g. MyPassword123!
+            Regex("(?i)(password|passcode|pin|otp|cvv|cvc|secret|token|pwd)"),
+            Regex("(?i)(private[ _]?key|bearer)"),
             Regex("^\\d{4,6}$"),                                      // e.g. 1234, 894312 (standalone PIN/OTP)
             Regex("\\b\\d{4}[ -]?\\d{4}[ -]?\\d{4}[ -]?\\d{4}\\b"), // Credit card format
             Regex("\\b\\d{3}[ -]?\\d{2}[ -]?\\d{4}\\b")             // SSN format

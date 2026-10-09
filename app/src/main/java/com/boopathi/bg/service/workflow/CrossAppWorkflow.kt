@@ -22,7 +22,10 @@ enum class CrossAppWorkflowStatus {
     VERIFYING,
     SUCCESS,
     FAILED,
-    CANCELLED
+    CANCELLED,
+    INTERRUPTED,
+    EXPIRED,
+    UNVERIFIED
 }
 
 /**
@@ -69,6 +72,9 @@ data class CrossAppWorkflow(
     val totalHandoffs: Int get() = steps.count { it.isHandoff }
     val isComplete: Boolean get() = status == CrossAppWorkflowStatus.SUCCESS ||
             status == CrossAppWorkflowStatus.FAILED ||
-            status == CrossAppWorkflowStatus.CANCELLED
+            status == CrossAppWorkflowStatus.CANCELLED ||
+            status == CrossAppWorkflowStatus.EXPIRED
+    val isTerminal: Boolean get() = isComplete
+    val isResumable: Boolean get() = status == CrossAppWorkflowStatus.INTERRUPTED
 }
 

@@ -64,23 +64,27 @@ class MainViewModel @JvmOverloads constructor(
     val notificationStatus = notificationAccessManager.status
     val recentNotifications = notificationAccessManager.repository.notificationFlow
 
-    // Phase 6C Cross-App Workflow Orchestration
+    // Dependency injection / Clean architecture
+    val repository: RoomBGRepository = RoomBGRepository(BGDatabase.getInstance(application))
+
+    // Phase 6C & 6D Cross-App Workflow Orchestration & Continuity
     val crossAppWorkflowPlanner: com.boopathi.bg.service.workflow.CrossAppWorkflowPlanner =
         com.boopathi.bg.service.workflow.CrossAppWorkflowPlanner()
     val crossAppWorkflowExecutor: com.boopathi.bg.service.workflow.CrossAppWorkflowExecutor =
         com.boopathi.bg.service.workflow.CrossAppWorkflowExecutor(
             appAgent = appAgent,
             multiStepAgent = multiStepAgent,
-            toolRegistry = toolRegistry
+            toolRegistry = toolRegistry,
+            repository = repository
         )
 
     val currentWorkflow = crossAppWorkflowExecutor.currentWorkflow
     val workflowStatus = crossAppWorkflowExecutor.workflowStatus
     val workflowProgressMessage = crossAppWorkflowExecutor.progressMessage
+    val workflowHistoryFlow = repository.getRecentWorkflowHistoriesFlow(10)
 
-    // Dependency injection / Clean architecture
     val memoryManager: MemoryManager = customMemoryManager ?: RoomMemoryManager(
-        repository = RoomBGRepository(BGDatabase.getInstance(application)),
+        repository = repository,
         scope = viewModelScope
     )
     private val commandProcessor: CommandProcessor = CommandProcessor(
@@ -90,7 +94,8 @@ class MainViewModel @JvmOverloads constructor(
         multiStepAgent = multiStepAgent,
         notificationAccessManager = notificationAccessManager,
         crossAppWorkflowPlanner = crossAppWorkflowPlanner,
-        crossAppWorkflowExecutor = crossAppWorkflowExecutor
+        crossAppWorkflowExecutor = crossAppWorkflowExecutor,
+        repository = repository
     )
 
     private var voiceManager: VoiceManager? = null
@@ -147,6 +152,36 @@ class MainViewModel @JvmOverloads constructor(
 
     init {
         refreshProfileAndStats()
+        // Process restart / interruption recovery: mark any orphaned in-flight tasks as INTERRUPTED
+        viewModelScope.launch {
+            repository.markActiveWorkflowsAsInterrupted()
+            repository.markExpiredWorkflows()
+        }
+    }
+
+    fun resumeWorkflow(workflowId: String) {
+        viewModelScope.launch {
+            val owner = _ownerProfile.value
+            crossAppWorkflowExecutor.resumeWorkflow(
+                workflowId = workflowId,
+                owner = owner,
+                currentForegroundPackage = accessibilityBridge.getCurrentPackage()
+            )
+        }
+    }
+
+    fun dismissWorkflowHistory(workflowId: String) {
+        viewModelScope.launch {
+            val item = repository.getWorkflowHistoryById(workflowId)
+            if (item != null) {
+                repository.saveWorkflowHistory(
+                    item.copy(
+                        isEligibleForResume = false,
+                        status = com.boopathi.bg.service.workflow.CrossAppWorkflowStatus.CANCELLED.name
+                    )
+                )
+            }
+        }
     }
 
     fun refreshProfileAndStats() {
@@ -271,7 +306,9 @@ class MainViewModel @JvmOverloads constructor(
 
     fun cancelTask() {
         multiStepAgent.cancelCurrentTask("Cancelled by user via UI")
-        crossAppWorkflowExecutor.cancelWorkflow("Cancelled by user via UI")
+        viewModelScope.launch {
+            crossAppWorkflowExecutor.cancelWorkflow("Cancelled by user via UI")
+        }
     }
 
     fun confirmAction() {

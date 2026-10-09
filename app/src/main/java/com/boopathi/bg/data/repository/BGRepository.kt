@@ -40,6 +40,18 @@ interface BGRepository {
     suspend fun getAllTasks(): List<TaskEntity>
     suspend fun getActiveTasks(): List<TaskEntity>
     suspend fun completeTask(keyword: String): Boolean
+
+    // Phase 6D: Workflow History & Continuity
+    suspend fun saveWorkflowHistory(entity: com.boopathi.bg.data.local.entity.WorkflowHistoryEntity)
+    suspend fun getWorkflowHistoryById(workflowId: String): com.boopathi.bg.data.local.entity.WorkflowHistoryEntity?
+    suspend fun getRecentWorkflowHistories(limit: Int = 100): List<com.boopathi.bg.data.local.entity.WorkflowHistoryEntity>
+    fun getRecentWorkflowHistoriesFlow(limit: Int = 100): Flow<List<com.boopathi.bg.data.local.entity.WorkflowHistoryEntity>>
+    suspend fun getLatestWorkflowHistory(): com.boopathi.bg.data.local.entity.WorkflowHistoryEntity?
+    suspend fun getResumableWorkflows(): List<com.boopathi.bg.data.local.entity.WorkflowHistoryEntity>
+    suspend fun markActiveWorkflowsAsInterrupted(): Int
+    suspend fun markExpiredWorkflows(): Int
+    suspend fun clearWorkflowHistory(): Int
+    suspend fun trimWorkflowHistory(keepLimit: Int = 100): Int
 }
 
 class RoomBGRepository(
@@ -170,6 +182,48 @@ class RoomBGRepository(
         } else {
             false
         }
+    }
+
+    // Phase 6D: Workflow History & Continuity Implementation
+    override suspend fun saveWorkflowHistory(entity: com.boopathi.bg.data.local.entity.WorkflowHistoryEntity): Unit = withContext(ioDispatcher) {
+        db.workflowHistoryDao().insertOrUpdate(entity)
+        // Auto-trim to retain at most 100 entries per retention policy
+        db.workflowHistoryDao().trimOldHistory(100)
+    }
+
+    override suspend fun getWorkflowHistoryById(workflowId: String): com.boopathi.bg.data.local.entity.WorkflowHistoryEntity? = withContext(ioDispatcher) {
+        db.workflowHistoryDao().getWorkflowById(workflowId)
+    }
+
+    override suspend fun getRecentWorkflowHistories(limit: Int): List<com.boopathi.bg.data.local.entity.WorkflowHistoryEntity> = withContext(ioDispatcher) {
+        db.workflowHistoryDao().getRecentWorkflows(limit)
+    }
+
+    override fun getRecentWorkflowHistoriesFlow(limit: Int): Flow<List<com.boopathi.bg.data.local.entity.WorkflowHistoryEntity>> =
+        db.workflowHistoryDao().getRecentWorkflowsFlow(limit)
+
+    override suspend fun getLatestWorkflowHistory(): com.boopathi.bg.data.local.entity.WorkflowHistoryEntity? = withContext(ioDispatcher) {
+        db.workflowHistoryDao().getLatestWorkflow()
+    }
+
+    override suspend fun getResumableWorkflows(): List<com.boopathi.bg.data.local.entity.WorkflowHistoryEntity> = withContext(ioDispatcher) {
+        db.workflowHistoryDao().getResumableWorkflows()
+    }
+
+    override suspend fun markActiveWorkflowsAsInterrupted(): Int = withContext(ioDispatcher) {
+        db.workflowHistoryDao().markActiveWorkflowsAsInterrupted()
+    }
+
+    override suspend fun markExpiredWorkflows(): Int = withContext(ioDispatcher) {
+        db.workflowHistoryDao().markExpiredWorkflows()
+    }
+
+    override suspend fun clearWorkflowHistory(): Int = withContext(ioDispatcher) {
+        db.workflowHistoryDao().clearAllWorkflowHistory()
+    }
+
+    override suspend fun trimWorkflowHistory(keepLimit: Int): Int = withContext(ioDispatcher) {
+        db.workflowHistoryDao().trimOldHistory(keepLimit)
     }
 }
 

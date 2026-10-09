@@ -28,7 +28,8 @@ class CommandProcessor(
     val agentPlanner: com.boopathi.bg.service.planner.AgentPlanner? = null,
     val agentPlanExecutor: com.boopathi.bg.service.planner.AgentPlanExecutor? = null,
     val crossAppWorkflowPlanner: com.boopathi.bg.service.workflow.CrossAppWorkflowPlanner? = null,
-    val crossAppWorkflowExecutor: com.boopathi.bg.service.workflow.CrossAppWorkflowExecutor? = null
+    val crossAppWorkflowExecutor: com.boopathi.bg.service.workflow.CrossAppWorkflowExecutor? = null,
+    val repository: com.boopathi.bg.data.repository.BGRepository? = null
 ) {
 
     companion object {
@@ -86,7 +87,8 @@ class CommandProcessor(
         val wfExecutor = crossAppWorkflowExecutor ?: if (appAgent != null) com.boopathi.bg.service.workflow.CrossAppWorkflowExecutor(
             appAgent = appAgent,
             multiStepAgent = multiStepAgent,
-            toolRegistry = toolRegistry
+            toolRegistry = toolRegistry,
+            repository = repository
         ) else null
 
         val plannedWorkflow = wfPlanner?.createDeterministicWorkflow(trimmed)
@@ -94,6 +96,13 @@ class CommandProcessor(
             Log.d(TAG, "Router: Matched CrossAppWorkflow -> ${plannedWorkflow.goalDescription} (${plannedWorkflow.totalSteps} steps)")
             val wfResult = wfExecutor.executeWorkflow(plannedWorkflow, owner)
             return wfResult
+        }
+
+        // Priority 0.6: Workflow History & Safe Resumption Commands (Phase 6D)
+        val workflowHistoryResult = handleWorkflowHistoryCommand(trimmed, owner, wfExecutor)
+        if (workflowHistoryResult != null) {
+            Log.d(TAG, "Router: Executed via [${workflowHistoryResult.providerName}]")
+            return workflowHistoryResult
         }
 
         // Routing Hierarchy:
@@ -773,5 +782,190 @@ class CommandProcessor(
                 "Task status: ${task.state}."
             }
         }
+    }
+
+    private suspend fun handleWorkflowHistoryCommand(
+        text: String,
+        owner: OwnerProfile,
+        executor: com.boopathi.bg.service.workflow.CrossAppWorkflowExecutor?
+    ): CommandResult? {
+        val lower = text.lowercase().trim().removeSuffix(".").removeSuffix("!").removeSuffix("?").trim()
+        val repo = repository ?: return null
+
+        // 1. Show recent tasks / workflow history (English & Tamil / Tanglish)
+        if (lower in listOf(
+                "show my recent tasks", "show recent tasks", "show workflow history", "task history",
+                "recent tasks", "enna tasks pannirukka", "kadasiya enna pannina", "tasks history",
+                "show task history", "what tasks did you run"
+            )
+        ) {
+            val history = repo.getRecentWorkflowHistories(5)
+            if (history.isEmpty()) {
+                val emptyMsg = if (owner.preferredLanguage == "ta") "Endha pazhaiya task-um illa." else "You have no recorded tasks in history."
+                return CommandResult(
+                    textResponse = emptyMsg,
+                    providerName = "WorkflowHistory",
+                    isSuccess = true
+                )
+            }
+
+            val sb = java.lang.StringBuilder()
+            sb.append(if (owner.preferredLanguage == "ta") "Unga kadasi tasks:\n" else "Recent workflow tasks:\n")
+            for ((idx, item) in history.withIndex()) {
+                val statusLabel = when (item.typedStatus) {
+                    com.boopathi.bg.service.workflow.CrossAppWorkflowStatus.SUCCESS -> "✓ Completed"
+                    com.boopathi.bg.service.workflow.CrossAppWorkflowStatus.FAILED -> "✗ Failed"
+                    com.boopathi.bg.service.workflow.CrossAppWorkflowStatus.CANCELLED -> "⏹ Cancelled"
+                    com.boopathi.bg.service.workflow.CrossAppWorkflowStatus.INTERRUPTED -> "⏸ Interrupted"
+                    com.boopathi.bg.service.workflow.CrossAppWorkflowStatus.UNVERIFIED -> "⚠️ Unverified"
+                    com.boopathi.bg.service.workflow.CrossAppWorkflowStatus.EXPIRED -> "⌛ Expired"
+                    else -> item.typedStatus.name
+                }
+                sb.append("${idx + 1}. [${statusLabel}] ${item.goalDescription} (${item.currentStepIndex}/${item.totalSteps} steps)\n")
+            }
+
+            return CommandResult(
+                textResponse = sb.toString().trim(),
+                providerName = "WorkflowHistory",
+                isSuccess = true
+            )
+        }
+
+        // 2. What happened to my last task? (English & Tamil / Tanglish)
+        if (lower in listOf(
+                "what happened to my last task", "what happened to the last task", "last task status",
+                "kadasi task ennachu", "kadasi task status enna", "what happened to my task"
+            )
+        ) {
+            val latest = repo.getLatestWorkflowHistory()
+            if (latest == null) {
+                val emptyMsg = if (owner.preferredLanguage == "ta") "Pazhaiya task edhuvum illa." else "No previous task found."
+                return CommandResult(
+                    textResponse = emptyMsg,
+                    providerName = "WorkflowHistory",
+                    isSuccess = true
+                )
+            }
+
+            val reasonSuffix = if (!latest.failureReason.isNullOrBlank()) " (${latest.failureReason})" else ""
+            val statusDesc = when (latest.typedStatus) {
+                com.boopathi.bg.service.workflow.CrossAppWorkflowStatus.SUCCESS -> "completed successfully"
+                com.boopathi.bg.service.workflow.CrossAppWorkflowStatus.FAILED -> "failed$reasonSuffix"
+                com.boopathi.bg.service.workflow.CrossAppWorkflowStatus.CANCELLED -> "cancelled by user"
+                com.boopathi.bg.service.workflow.CrossAppWorkflowStatus.INTERRUPTED -> "interrupted and can be resumed"
+                com.boopathi.bg.service.workflow.CrossAppWorkflowStatus.UNVERIFIED -> "halted because consequential outcome was unverified"
+                com.boopathi.bg.service.workflow.CrossAppWorkflowStatus.EXPIRED -> "expired"
+                else -> latest.typedStatus.name.lowercase()
+            }
+
+            val msg = if (owner.preferredLanguage == "ta") {
+                "Kadasi task '${latest.goalDescription}' $statusDesc."
+            } else {
+                "Your last task '${latest.goalDescription}' was $statusDesc."
+            }
+
+            return CommandResult(
+                textResponse = msg,
+                providerName = "WorkflowHistory",
+                isSuccess = true
+            )
+        }
+
+        // 3. Resume interrupted workflow (English & Tamil / Tanglish)
+        if (lower in listOf(
+                "resume the interrupted workflow", "resume interrupted workflow", "resume last workflow",
+                "resume workflow", "resume task", "interrupted task resume pannu", "task continue pannu"
+            )
+        ) {
+            val resumableList = repo.getResumableWorkflows()
+            if (resumableList.isEmpty()) {
+                val noResumableMsg = if (owner.preferredLanguage == "ta") "Resume panna endha interrupted task-um illa." else "No interrupted workflows eligible for resumption."
+                return CommandResult(
+                    textResponse = noResumableMsg,
+                    providerName = "WorkflowHistory",
+                    isSuccess = false
+                )
+            }
+
+            if (resumableList.size > 1) {
+                val disambiguateMsg = if (owner.preferredLanguage == "ta") {
+                    "Multiple interrupted tasks irukku: '${resumableList[0].goalDescription}' or '${resumableList[1].goalDescription}'. Edha resume pannanum?"
+                } else {
+                    "Multiple interrupted tasks found: '${resumableList[0].goalDescription}' and '${resumableList[1].goalDescription}'. Which one would you like to resume?"
+                }
+                return CommandResult(
+                    textResponse = disambiguateMsg,
+                    providerName = "WorkflowHistory",
+                    isSuccess = true
+                )
+            }
+
+            val targetWorkflow = resumableList.first()
+            if (executor == null) {
+                return CommandResult(
+                    textResponse = "Workflow executor is unavailable.",
+                    providerName = "WorkflowHistory",
+                    isSuccess = false
+                )
+            }
+
+            val resumeResult = executor.resumeWorkflow(targetWorkflow.workflowId, owner)
+            return resumeResult
+        }
+
+        // 4. Cancel previous / interrupted workflow
+        if (lower in listOf(
+                "cancel the previous workflow", "cancel previous workflow", "cancel interrupted task",
+                "cancel old workflow", "pazhaiya task cancel pannu"
+            )
+        ) {
+            val resumableList = repo.getResumableWorkflows()
+            if (resumableList.isEmpty()) {
+                val noMsg = if (owner.preferredLanguage == "ta") "Cancel panna task edhuvum illa." else "No pending interrupted workflow to cancel."
+                return CommandResult(
+                    textResponse = noMsg,
+                    providerName = "WorkflowHistory",
+                    isSuccess = false
+                )
+            }
+
+            for (wf in resumableList) {
+                repo.saveWorkflowHistory(
+                    wf.copy(
+                        status = com.boopathi.bg.service.workflow.CrossAppWorkflowStatus.CANCELLED.name,
+                        isEligibleForResume = false,
+                        updatedAt = System.currentTimeMillis()
+                    )
+                )
+            }
+
+            val cancelMsg = if (owner.preferredLanguage == "ta") "Previous interrupted task cancel panniyachu." else "Previous interrupted task cancelled."
+            return CommandResult(
+                textResponse = cancelMsg,
+                providerName = "WorkflowHistory",
+                isSuccess = true
+            )
+        }
+
+        // 5. Clear workflow history
+        if (lower in listOf(
+                "clear my workflow history", "clear workflow history", "delete workflow history",
+                "clear task history", "workflow history clear pannu"
+            )
+        ) {
+            val deletedCount = repo.clearWorkflowHistory()
+            val clearMsg = if (owner.preferredLanguage == "ta") {
+                "Workflow history clear panniyachu ($deletedCount records removed)."
+            } else {
+                "Workflow history cleared ($deletedCount records removed). Memory and notes were preserved."
+            }
+            return CommandResult(
+                textResponse = clearMsg,
+                providerName = "WorkflowHistory",
+                isSuccess = true
+            )
+        }
+
+        return null
     }
 }

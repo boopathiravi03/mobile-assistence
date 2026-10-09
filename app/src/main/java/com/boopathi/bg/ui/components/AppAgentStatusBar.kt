@@ -47,7 +47,10 @@ fun AppAgentStatusBar(
     currentWorkflow: com.boopathi.bg.service.workflow.CrossAppWorkflow? = null,
     workflowStatus: com.boopathi.bg.service.workflow.CrossAppWorkflowStatus = com.boopathi.bg.service.workflow.CrossAppWorkflowStatus.READY,
     workflowProgressMessage: String = "",
+    workflowHistoryList: List<com.boopathi.bg.data.local.entity.WorkflowHistoryEntity> = emptyList(),
     notificationStatus: com.boopathi.bg.service.notification.NotificationAccessStatus = com.boopathi.bg.service.notification.NotificationAccessStatus.NOT_ENABLED,
+    onResumeWorkflowClick: (String) -> Unit = {},
+    onDismissWorkflowClick: (String) -> Unit = {},
     onOpenSettingsClick: () -> Unit,
     onOpenNotificationSettingsClick: () -> Unit = {},
     onCancelTaskClick: () -> Unit = {},
@@ -290,6 +293,81 @@ fun AppAgentStatusBar(
                             .background(Color(0xFFFF5252).copy(alpha = 0.2f))
                             .border(1.dp, Color(0xFFFF5252), RoundedCornerShape(4.dp))
                             .clickable { onCancelTaskClick() }
+                            .padding(horizontal = 8.dp, vertical = 3.dp)
+                    )
+                }
+            }
+        }
+
+        // Phase 6D: Interrupted Workflow Resume Prompt Card
+        val interruptedItem = workflowHistoryList.firstOrNull { it.typedStatus == com.boopathi.bg.service.workflow.CrossAppWorkflowStatus.INTERRUPTED && it.isEligibleForResume }
+        if (interruptedItem != null && (currentWorkflow == null || currentWorkflow.isComplete)) {
+            Spacer(modifier = Modifier.height(6.dp))
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(Color(0xFF0F172A))
+                    .border(1.dp, PulseAmber.copy(alpha = 0.5f), RoundedCornerShape(6.dp))
+                    .padding(8.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "⏸ INTERRUPTED TASK",
+                        color = PulseAmber,
+                        fontSize = 10.sp,
+                        fontFamily = FontFamily.Monospace,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        text = "Step ${interruptedItem.currentStepIndex + 1}/${interruptedItem.totalSteps}",
+                        color = TextSecondary,
+                        fontSize = 10.sp,
+                        fontFamily = FontFamily.Monospace
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(2.dp))
+                Text(
+                    text = interruptedItem.goalDescription,
+                    color = TextPrimary,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.SemiBold
+                )
+
+                Spacer(modifier = Modifier.height(6.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "DISMISS",
+                        color = TextSecondary,
+                        fontSize = 10.sp,
+                        fontFamily = FontFamily.Monospace,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(4.dp))
+                            .background(Color.White.copy(alpha = 0.05f))
+                            .clickable { onDismissWorkflowClick(interruptedItem.workflowId) }
+                            .padding(horizontal = 8.dp, vertical = 3.dp)
+                    )
+                    Spacer(modifier = Modifier.size(8.dp))
+                    Text(
+                        text = "▶ RESUME",
+                        color = Color(0xFF00E676),
+                        fontSize = 10.sp,
+                        fontFamily = FontFamily.Monospace,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(4.dp))
+                            .background(Color(0xFF00E676).copy(alpha = 0.2f))
+                            .border(1.dp, Color(0xFF00E676), RoundedCornerShape(4.dp))
+                            .clickable { onResumeWorkflowClick(interruptedItem.workflowId) }
                             .padding(horizontal = 8.dp, vertical = 3.dp)
                     )
                 }

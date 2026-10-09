@@ -27,12 +27,17 @@ import kotlinx.coroutines.withContext
  * - Bounded recovery via Phase 6B
  * - Transient data clearing on finish/cancel
  */
+import com.boopathi.bg.data.local.entity.WorkflowHistoryEntity
+import com.boopathi.bg.data.repository.BGRepository
+
 class CrossAppWorkflowExecutor(
     private val appAgent: AppAgent,
     private val multiStepAgent: MultiStepAgent? = null,
     private val toolRegistry: ToolRegistry? = null,
     private val handoffVerifier: CrossAppHandoffVerifier = CrossAppHandoffVerifier(appAgent.bridge),
-    private val messagingAdapter: MessagingAppAdapter = WhatsAppMessagingAdapter()
+    private val messagingAdapter: MessagingAppAdapter = WhatsAppMessagingAdapter(),
+    private val repository: BGRepository? = null,
+    val resumePolicy: WorkflowResumePolicy = WorkflowResumePolicy()
 ) {
 
     companion object {
@@ -50,7 +55,38 @@ class CrossAppWorkflowExecutor(
 
     private var activeContext: WorkflowContext? = null
 
-    fun cancelWorkflow(reason: String = "User requested cancellation"): Boolean {
+    suspend fun saveHistoryRecord(
+        wf: CrossAppWorkflow,
+        checkpoint: WorkflowCheckpoint? = null,
+        isEligibleForResume: Boolean = false,
+        consequentialAttempted: Boolean = false,
+        consequentialUncertain: Boolean = false
+    ) {
+        if (repository == null) return
+        try {
+            val entity = WorkflowHistoryEntity(
+                workflowId = wf.workflowId,
+                goalDescription = wf.goalDescription,
+                workflowType = wf.type.name,
+                status = wf.status.name,
+                currentStepIndex = wf.currentStepIndex,
+                totalSteps = wf.totalSteps,
+                createdAt = wf.createdAtMillis,
+                updatedAt = System.currentTimeMillis(),
+                lastSafeCheckpointJson = checkpoint?.toJson(),
+                failureReason = wf.failureReason,
+                isEligibleForResume = isEligibleForResume,
+                consequentialActionAttempted = consequentialAttempted,
+                consequentialOutcomeUncertain = consequentialUncertain,
+                stepsJson = WorkflowStepSerializer.serializeSteps(wf.steps)
+            )
+            repository.saveWorkflowHistory(entity)
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to persist workflow history: ${e.message}")
+        }
+    }
+
+    suspend fun cancelWorkflow(reason: String = "User requested cancellation"): Boolean {
         val wf = _currentWorkflow.value
         if (wf != null && !wf.isComplete) {
             Log.i(TAG, "Workflow ${wf.workflowId} cancelled: $reason")
@@ -63,6 +99,7 @@ class CrossAppWorkflowExecutor(
             _progressMessage.value = "Stopped safely: $reason"
             activeContext?.isCancelled = true
             activeContext?.clearTransientData()
+            saveHistoryRecord(cancelledWf, isEligibleForResume = false)
             return true
         }
         return false
@@ -274,12 +311,37 @@ class CrossAppWorkflowExecutor(
                 _workflowStatus.value = CrossAppWorkflowStatus.WAITING_FOR_CONFIRMATION
                 _progressMessage.value = "Ready to send message to $recipient. Waiting for confirmation."
 
+                saveHistoryRecord(
+                    currentWf,
+                    checkpoint = WorkflowCheckpoint(
+                        workflowId = currentWf.workflowId,
+                        completedStepIndex = index,
+                        expectedPackage = expectedPkg,
+                        expectedOutcome = "Prepared draft for $recipient"
+                    ),
+                    isEligibleForResume = false,
+                    consequentialAttempted = false
+                )
+
                 return@withContext CommandResult(
                     textResponse = "Ready to send '$messageText' to $recipient on ${step.targetApp}. Please confirm.",
                     providerName = "CrossAppWorkflow",
                     isSuccess = true
                 )
             }
+
+            // Save safe checkpoint after successfully verifying a non-consequential step
+            val stepCheckpoint = WorkflowCheckpoint(
+                workflowId = currentWf.workflowId,
+                completedStepIndex = index,
+                expectedPackage = expectedPkg,
+                expectedOutcome = step.expectedOutcome
+            )
+            saveHistoryRecord(
+                currentWf,
+                checkpoint = stepCheckpoint,
+                isEligibleForResume = true
+            )
         }
 
         // All steps completed successfully
@@ -288,6 +350,7 @@ class CrossAppWorkflowExecutor(
         _workflowStatus.value = CrossAppWorkflowStatus.SUCCESS
         _progressMessage.value = "Workflow completed successfully."
         context.clearTransientData()
+        saveHistoryRecord(currentWf, isEligibleForResume = false)
 
         val summary = "Completed cross-app workflow: ${currentWf.goalDescription}."
         CommandResult(
@@ -297,26 +360,80 @@ class CrossAppWorkflowExecutor(
         )
     }
 
-    private fun failWorkflow(
+    private suspend fun failWorkflow(
         wf: CrossAppWorkflow,
         context: WorkflowContext,
-        reason: String
+        reason: String,
+        consequentialAttempted: Boolean = false,
+        consequentialUncertain: Boolean = false
     ): CommandResult {
         Log.w(TAG, "Workflow failed: $reason")
+        val finalStatus = if (consequentialUncertain) CrossAppWorkflowStatus.UNVERIFIED else CrossAppWorkflowStatus.FAILED
         val failed = wf.copy(
-            status = CrossAppWorkflowStatus.FAILED,
+            status = finalStatus,
             failureReason = reason
         )
         _currentWorkflow.value = failed
-        _workflowStatus.value = CrossAppWorkflowStatus.FAILED
+        _workflowStatus.value = finalStatus
         _progressMessage.value = "Stopped safely: $reason"
         context.clearTransientData()
+
+        saveHistoryRecord(
+            failed,
+            isEligibleForResume = false,
+            consequentialAttempted = consequentialAttempted,
+            consequentialUncertain = consequentialUncertain
+        )
 
         return CommandResult(
             textResponse = "Stopped safely: $reason",
             providerName = "CrossAppWorkflow",
             isSuccess = false
         )
+    }
+
+    /**
+     * Resumes an interrupted workflow after fresh validation via WorkflowResumePolicy.
+     */
+    suspend fun resumeWorkflow(
+        workflowId: String,
+        owner: OwnerProfile,
+        currentForegroundPackage: String? = null
+    ): CommandResult {
+        if (repository == null) {
+            return CommandResult(
+                textResponse = "Task history database unavailable.",
+                providerName = "CrossAppWorkflow",
+                isSuccess = false
+            )
+        }
+
+        val historyEntity = repository.getWorkflowHistoryById(workflowId)
+        if (historyEntity == null) {
+            return CommandResult(
+                textResponse = "Workflow record not found.",
+                providerName = "CrossAppWorkflow",
+                isSuccess = false
+            )
+        }
+
+        // Validate via resume policy
+        val validation = resumePolicy.validateResumeEligibility(
+            historyEntity = historyEntity,
+            currentForegroundPackage = currentForegroundPackage
+        )
+
+        if (!validation.isEligible || validation.revalidatedWorkflow == null) {
+            val rejection = validation.rejectionReason ?: "Workflow is not eligible for resumption."
+            return CommandResult(
+                textResponse = "Cannot resume: $rejection",
+                providerName = "CrossAppWorkflow",
+                isSuccess = false
+            )
+        }
+
+        Log.i(TAG, "Resuming workflow '${historyEntity.goalDescription}' from step index ${historyEntity.currentStepIndex}")
+        return executeWorkflow(validation.revalidatedWorkflow, owner)
     }
 }
 
