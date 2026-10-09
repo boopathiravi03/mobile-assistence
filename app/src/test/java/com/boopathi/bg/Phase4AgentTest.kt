@@ -52,15 +52,15 @@ open class FakeAccessibilityBridge(
 
     open override suspend fun getVisibleElements(): List<UiElementInfo> = mockElements.toList()
 
-    override suspend fun findByText(query: String, normalized: Boolean): List<UiElementInfo> {
+    open override suspend fun findByText(query: String, normalized: Boolean): List<UiElementInfo> {
         return mockElements.filter { it.matchesQuery(query, normalized) }
     }
 
-    override suspend fun findByContentDescription(query: String, normalized: Boolean): List<UiElementInfo> {
+    open override suspend fun findByContentDescription(query: String, normalized: Boolean): List<UiElementInfo> {
         return mockElements.filter { it.contentDescription.contains(query, ignoreCase = true) }
     }
 
-    override suspend fun findByViewId(viewId: String): List<UiElementInfo> {
+    open override suspend fun findByViewId(viewId: String): List<UiElementInfo> {
         return mockElements.filter { it.viewId.contains(viewId, ignoreCase = true) }
     }
 

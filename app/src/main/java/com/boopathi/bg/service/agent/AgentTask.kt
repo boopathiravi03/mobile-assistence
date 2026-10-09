@@ -18,7 +18,9 @@ data class AgentTask(
     var confirmationRequest: ConfirmationRequest? = null,
     var draft: com.boopathi.bg.service.messaging.MessageDraft? = null,
     var confirmationCreatedAt: Long = System.currentTimeMillis(),
-    var sendExecuted: Boolean = false
+    var sendExecuted: Boolean = false,
+    var recoveryAttemptCount: Int = 0,
+    var lastRecoveryReason: String? = null
 ) {
     val totalSteps: Int get() = steps.size
     val currentStep: AgentStep?

@@ -13,14 +13,25 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.withContext
 
+import com.boopathi.bg.service.recovery.ExpectedState
+import com.boopathi.bg.service.recovery.ExpectedStateType
+import com.boopathi.bg.service.recovery.RecoveryPlanner
+import com.boopathi.bg.service.recovery.RecoveryPolicy
+import com.boopathi.bg.service.recovery.UiMismatch
+import com.boopathi.bg.service.recovery.UiMismatchType
+import com.boopathi.bg.service.recovery.UiSnapshotObserver
+import com.boopathi.bg.service.recovery.UiStateSnapshot
+
 /**
- * Bounded Multi-Step Execution Engine for Android App Automation (Phase 5A).
+ * Bounded Multi-Step Execution Engine for Android App Automation (Phase 5A & Phase 6B).
  * Enforces step-by-step risk policy checks, verified state transitions, retry bounds,
- * timeout limits, ambiguity handling, and cooperative cancellation.
+ * timeout limits, ambiguity handling, UI state awareness, bounded recovery, and cooperative cancellation.
  */
 class MultiStepAgent(
     val appAgent: AppAgent,
-    val config: AgentExecutionConfig = AgentExecutionConfig()
+    val config: AgentExecutionConfig = AgentExecutionConfig(),
+    val recoveryPlanner: RecoveryPlanner = RecoveryPlanner(),
+    val snapshotObserver: UiSnapshotObserver = UiSnapshotObserver(appAgent.bridge)
 ) {
 
     companion object {
@@ -206,13 +217,90 @@ class MultiStepAgent(
                 }
             }
 
-            // 4. Strict Stop-on-Failure boundary: Never proceed if unverified
+            // 4. Bounded Recovery Layer (Phase 6B)
             if (!stepSuccess) {
-                task.state = AgentTaskState.FAILED
-                task.failureReason = finalStepResult?.reason ?: "Step ${index + 1} failed verification."
-                _taskState.value = AgentTaskState.FAILED
-                Log.w(TAG, "Task '${task.normalizedGoal}' terminated at step ${index + 1}: ${task.failureReason}")
-                return@withContext task
+                var recovered = false
+                val recoveryStartTimeMs = System.currentTimeMillis()
+                var stepRecoveryAttempts = 0
+
+                val failureMismatchType = when (finalStepResult?.status) {
+                    AppActionResultStatus.NOT_FOUND -> UiMismatchType.TARGET_NOT_FOUND
+                    AppActionResultStatus.TIMEOUT -> UiMismatchType.SCREEN_NOT_READY
+                    AppActionResultStatus.FAILED -> UiMismatchType.ACTION_FAILED
+                    else -> UiMismatchType.EXPECTED_STATE_NOT_REACHED
+                }
+
+                val currentSnapshot = snapshotObserver.captureSnapshot()
+                val mismatch = UiMismatch(
+                    type = failureMismatchType,
+                    description = finalStepResult?.reason ?: "Step execution failed verification.",
+                    targetQuery = (step.action as? AppAction.Tap)?.targetQuery
+                        ?: (step.action as? AppAction.TypeText)?.targetQuery,
+                    expectedPackage = (step.action as? AppAction.WaitForWindow)?.expectedPackage,
+                    actualPackage = currentSnapshot.packageName,
+                    observedSnapshot = currentSnapshot
+                )
+
+                while (RecoveryPolicy.canAttemptRecovery(
+                        stepRecoveryCount = stepRecoveryAttempts,
+                        totalRecoveryCount = task.recoveryAttemptCount,
+                        recoveryStartTimeMs = recoveryStartTimeMs,
+                        action = step.action
+                    ).allowed && !recovered) {
+
+                    stepRecoveryAttempts++
+                    task.recoveryAttemptCount++
+                    task.lastRecoveryReason = mismatch.description
+                    step.status = StepStatus.RECOVERING
+                    task.state = AgentTaskState.RECOVERING
+                    _taskState.value = AgentTaskState.RECOVERING
+
+                    Log.i(TAG, "Attempting recovery for step ${index + 1} (step attempt $stepRecoveryAttempts, total ${task.recoveryAttemptCount}): ${mismatch.type}")
+
+                    val proposal = recoveryPlanner.planRecovery(
+                        failedStep = step,
+                        mismatch = mismatch,
+                        stepRecoveryCount = stepRecoveryAttempts,
+                        totalRecoveryCount = task.recoveryAttemptCount,
+                        recoveryStartTimeMs = recoveryStartTimeMs
+                    )
+
+                    if (!proposal.isExecutable || proposal.recoverySteps.isEmpty()) {
+                        Log.w(TAG, "Recovery proposal cannot be executed: ${proposal.explanation}")
+                        break
+                    }
+
+                    // Execute recovery steps sequentially
+                    var recoveryStepsSucceeded = true
+                    for (recStep in proposal.recoverySteps) {
+                        val recResult = appAgent.executeAction(recStep.action)
+                        if (!recResult.isSuccess) {
+                            recoveryStepsSucceeded = false
+                            break
+                        }
+                    }
+
+                    if (recoveryStepsSucceeded) {
+                        // Retry original step action once after recovery
+                        val retryActionResult = appAgent.executeAction(step.action)
+                        if (retryActionResult.isSuccess) {
+                            step.status = StepStatus.SUCCESS
+                            stepSuccess = true
+                            recovered = true
+                            Log.i(TAG, "Step ${index + 1} recovered successfully.")
+                        }
+                    }
+                }
+
+                // Strict Stop-on-Failure boundary: Never proceed if unverified
+                if (!stepSuccess) {
+                    step.status = StepStatus.FAILED
+                    task.state = AgentTaskState.FAILED
+                    task.failureReason = finalStepResult?.reason ?: "Step ${index + 1} failed verification."
+                    _taskState.value = AgentTaskState.FAILED
+                    Log.w(TAG, "Task '${task.normalizedGoal}' terminated at step ${index + 1}: ${task.failureReason}")
+                    return@withContext task
+                }
             }
         }
 

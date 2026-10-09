@@ -10,6 +10,7 @@ enum class StepStatus {
     SUCCESS,
     FAILED,
     RETRYING,
+    RECOVERING,
     SKIPPED,
     BLOCKED,
     WAITING_FOR_CONFIRMATION

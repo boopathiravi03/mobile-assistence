@@ -10,6 +10,7 @@ enum class AgentTaskState {
     EXECUTING,
     WAITING_FOR_CONFIRMATION,
     VERIFYING,
+    RECOVERING,
     PAUSED,
     SUCCESS,
     FAILED,

@@ -79,6 +79,7 @@ fun AppAgentStatusBar(
     val stateColor = when {
         taskState == AgentTaskState.EXECUTING || agentState == AppAgentState.EXECUTING -> NeonCyan
         taskState == AgentTaskState.VERIFYING || agentState == AppAgentState.VERIFYING -> PulseAmber
+        taskState == AgentTaskState.RECOVERING -> PulseAmber
         taskState == AgentTaskState.PLANNING || agentState == AppAgentState.PLANNING -> ElectricBlue
         taskState == AgentTaskState.SUCCESS || agentState == AppAgentState.SUCCESS -> Color(0xFF00E676)
         taskState == AgentTaskState.FAILED || agentState == AppAgentState.FAILED -> Color(0xFFFF5252)
