@@ -26,7 +26,9 @@ class CommandProcessor(
     val notificationAccessManager: com.boopathi.bg.service.notification.NotificationAccessManager? = null,
     val messagingTargetResolver: com.boopathi.bg.service.messaging.MessagingTargetResolver = com.boopathi.bg.service.messaging.MessagingTargetResolver(),
     val agentPlanner: com.boopathi.bg.service.planner.AgentPlanner? = null,
-    val agentPlanExecutor: com.boopathi.bg.service.planner.AgentPlanExecutor? = null
+    val agentPlanExecutor: com.boopathi.bg.service.planner.AgentPlanExecutor? = null,
+    val crossAppWorkflowPlanner: com.boopathi.bg.service.workflow.CrossAppWorkflowPlanner? = null,
+    val crossAppWorkflowExecutor: com.boopathi.bg.service.workflow.CrossAppWorkflowExecutor? = null
 ) {
 
     companion object {
@@ -69,13 +71,29 @@ class CommandProcessor(
         // Priority 0: Explicit Cancellation Command ("Stop", "Cancel", "BG stop", "Cancel task", "Stop pannu", "BG niruthu")
         val lowerClean = trimmed.lowercase().removeSuffix(".").removeSuffix("!").trim()
         if (lowerClean in listOf("stop", "cancel", "bg stop", "cancel task", "stop task", "stop pannu", "cancel pannu", "bg niruthu", "niruthu")) {
-            val cancelled = multiStepAgent?.cancelCurrentTask("Cancelled by user request") ?: false
-            val cancelMsg = if (cancelled) "Task stopped." else "No active task running."
+            val agentCancelled = multiStepAgent?.cancelCurrentTask("Cancelled by user request") ?: false
+            val workflowCancelled = crossAppWorkflowExecutor?.cancelWorkflow("Cancelled by user request") ?: false
+            val cancelMsg = if (agentCancelled || workflowCancelled) "Task stopped." else "No active task running."
             return CommandResult(
                 textResponse = cancelMsg,
                 providerName = "MultiStepAgent",
                 isSuccess = true
             )
+        }
+
+        // Priority 0.5: Cross-App Workflow Orchestration (Phase 6C)
+        val wfPlanner = crossAppWorkflowPlanner ?: if (appAgent != null) com.boopathi.bg.service.workflow.CrossAppWorkflowPlanner() else null
+        val wfExecutor = crossAppWorkflowExecutor ?: if (appAgent != null) com.boopathi.bg.service.workflow.CrossAppWorkflowExecutor(
+            appAgent = appAgent,
+            multiStepAgent = multiStepAgent,
+            toolRegistry = toolRegistry
+        ) else null
+
+        val plannedWorkflow = wfPlanner?.createDeterministicWorkflow(trimmed)
+        if (plannedWorkflow != null && wfExecutor != null) {
+            Log.d(TAG, "Router: Matched CrossAppWorkflow -> ${plannedWorkflow.goalDescription} (${plannedWorkflow.totalSteps} steps)")
+            val wfResult = wfExecutor.executeWorkflow(plannedWorkflow, owner)
+            return wfResult
         }
 
         // Routing Hierarchy:

@@ -64,6 +64,20 @@ class MainViewModel @JvmOverloads constructor(
     val notificationStatus = notificationAccessManager.status
     val recentNotifications = notificationAccessManager.repository.notificationFlow
 
+    // Phase 6C Cross-App Workflow Orchestration
+    val crossAppWorkflowPlanner: com.boopathi.bg.service.workflow.CrossAppWorkflowPlanner =
+        com.boopathi.bg.service.workflow.CrossAppWorkflowPlanner()
+    val crossAppWorkflowExecutor: com.boopathi.bg.service.workflow.CrossAppWorkflowExecutor =
+        com.boopathi.bg.service.workflow.CrossAppWorkflowExecutor(
+            appAgent = appAgent,
+            multiStepAgent = multiStepAgent,
+            toolRegistry = toolRegistry
+        )
+
+    val currentWorkflow = crossAppWorkflowExecutor.currentWorkflow
+    val workflowStatus = crossAppWorkflowExecutor.workflowStatus
+    val workflowProgressMessage = crossAppWorkflowExecutor.progressMessage
+
     // Dependency injection / Clean architecture
     val memoryManager: MemoryManager = customMemoryManager ?: RoomMemoryManager(
         repository = RoomBGRepository(BGDatabase.getInstance(application)),
@@ -74,7 +88,9 @@ class MainViewModel @JvmOverloads constructor(
         toolRegistry = toolRegistry,
         appAgent = appAgent,
         multiStepAgent = multiStepAgent,
-        notificationAccessManager = notificationAccessManager
+        notificationAccessManager = notificationAccessManager,
+        crossAppWorkflowPlanner = crossAppWorkflowPlanner,
+        crossAppWorkflowExecutor = crossAppWorkflowExecutor
     )
 
     private var voiceManager: VoiceManager? = null
@@ -255,6 +271,7 @@ class MainViewModel @JvmOverloads constructor(
 
     fun cancelTask() {
         multiStepAgent.cancelCurrentTask("Cancelled by user via UI")
+        crossAppWorkflowExecutor.cancelWorkflow("Cancelled by user via UI")
     }
 
     fun confirmAction() {

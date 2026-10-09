@@ -44,6 +44,9 @@ fun AppAgentStatusBar(
     lastResult: AppActionResult?,
     currentTask: AgentTask? = null,
     taskState: AgentTaskState = AgentTaskState.IDLE,
+    currentWorkflow: com.boopathi.bg.service.workflow.CrossAppWorkflow? = null,
+    workflowStatus: com.boopathi.bg.service.workflow.CrossAppWorkflowStatus = com.boopathi.bg.service.workflow.CrossAppWorkflowStatus.READY,
+    workflowProgressMessage: String = "",
     notificationStatus: com.boopathi.bg.service.notification.NotificationAccessStatus = com.boopathi.bg.service.notification.NotificationAccessStatus.NOT_ENABLED,
     onOpenSettingsClick: () -> Unit,
     onOpenNotificationSettingsClick: () -> Unit = {},
@@ -194,6 +197,102 @@ fun AppAgentStatusBar(
                         .clickable { onOpenNotificationSettingsClick() }
                         .padding(horizontal = 6.dp, vertical = 2.dp)
                 )
+            }
+        }
+
+        // Active Cross-App Workflow Progress Section (Phase 6C)
+        if (currentWorkflow != null && !currentWorkflow.isComplete) {
+            Spacer(modifier = Modifier.height(6.dp))
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(Color(0xFF070B14))
+                    .padding(8.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "Workflow: ${currentWorkflow.goalDescription}",
+                        color = TextPrimary,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+
+                    Text(
+                        text = "Step ${currentWorkflow.currentStepIndex + 1}/${currentWorkflow.totalSteps}",
+                        color = NeonCyan,
+                        fontSize = 10.sp,
+                        fontFamily = FontFamily.Monospace
+                    )
+                }
+
+                if (workflowProgressMessage.isNotBlank()) {
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(
+                        text = workflowProgressMessage,
+                        color = ElectricBlue,
+                        fontSize = 10.sp,
+                        fontFamily = FontFamily.Monospace
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(4.dp))
+
+                currentWorkflow.steps.forEachIndexed { idx, step ->
+                    val isDone = idx < currentWorkflow.currentStepIndex
+                    val isCurrent = idx == currentWorkflow.currentStepIndex
+                    val stepIcon = if (isDone) "✓" else if (isCurrent) "●" else "○"
+                    val stepColor = if (isDone) Color(0xFF00E676) else if (isCurrent) NeonCyan else TextSecondary
+
+                    Text(
+                        text = "$stepIcon [${step.appRole}] ${step.actionReference} (${step.targetApp})",
+                        color = stepColor,
+                        fontSize = 10.sp,
+                        fontFamily = FontFamily.Monospace
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(6.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    if (workflowStatus == com.boopathi.bg.service.workflow.CrossAppWorkflowStatus.WAITING_FOR_CONFIRMATION) {
+                        Text(
+                            text = "✓ CONFIRM",
+                            color = Color(0xFF00E676),
+                            fontSize = 10.sp,
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(4.dp))
+                                .background(Color(0xFF00E676).copy(alpha = 0.2f))
+                                .border(1.dp, Color(0xFF00E676), RoundedCornerShape(4.dp))
+                                .clickable { onConfirmClick() }
+                                .padding(horizontal = 8.dp, vertical = 3.dp)
+                        )
+                        Spacer(modifier = Modifier.size(8.dp))
+                    }
+
+                    Text(
+                        text = "⏹ STOP",
+                        color = Color(0xFFFF5252),
+                        fontSize = 10.sp,
+                        fontFamily = FontFamily.Monospace,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(4.dp))
+                            .background(Color(0xFFFF5252).copy(alpha = 0.2f))
+                            .border(1.dp, Color(0xFFFF5252), RoundedCornerShape(4.dp))
+                            .clickable { onCancelTaskClick() }
+                            .padding(horizontal = 8.dp, vertical = 3.dp)
+                    )
+                }
             }
         }
 
