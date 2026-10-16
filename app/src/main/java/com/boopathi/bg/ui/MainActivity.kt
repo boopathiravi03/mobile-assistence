@@ -2,13 +2,14 @@ package com.boopathi.bg.ui
 
 import android.Manifest
 import android.content.pm.PackageManager
+import android.content.Intent
 import android.os.Bundle
+import android.net.Uri
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
-import androidx.compose.runtime.LaunchedEffect
 import androidx.core.content.ContextCompat
 import com.boopathi.bg.ui.theme.BGTheme
 
@@ -25,7 +26,7 @@ class MainActivity : ComponentActivity() {
             this,
             Manifest.permission.RECORD_AUDIO
         ) == PackageManager.PERMISSION_GRANTED
-        viewModel.onMicPermissionResult(hasInitialMicPermission)
+        if (hasInitialMicPermission) viewModel.onMicPermissionResult(true)
 
         setContent {
             BGTheme {
@@ -36,16 +37,19 @@ class MainActivity : ComponentActivity() {
                     }
                 )
 
-                LaunchedEffect(Unit) {
-                    if (!hasInitialMicPermission) {
-                        permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
-                    }
-                }
-
                 MainScreen(
                     viewModel = viewModel,
                     onRequestPermission = {
-                        permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                        val prefs = getSharedPreferences("voice_permission", MODE_PRIVATE)
+                        val requestedBefore = prefs.getBoolean("requested", false)
+                        if (requestedBefore && !shouldShowRequestPermissionRationale(Manifest.permission.RECORD_AUDIO)) {
+                            startActivity(Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                                data = Uri.fromParts("package", packageName, null)
+                            })
+                        } else {
+                            prefs.edit().putBoolean("requested", true).apply()
+                            permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                        }
                     }
                 )
             }

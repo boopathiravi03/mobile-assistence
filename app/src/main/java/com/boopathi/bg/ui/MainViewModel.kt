@@ -126,6 +126,9 @@ class MainViewModel @JvmOverloads constructor(
     private val _errorMessage = MutableStateFlow<String?>(null)
     val errorMessage: StateFlow<String?> = _errorMessage.asStateFlow()
 
+    private val _voiceTranscript = MutableStateFlow("")
+    val voiceTranscript: StateFlow<String> = _voiceTranscript.asStateFlow()
+
     // Owner Profile & Memory Inspection State
     private val _ownerProfile = MutableStateFlow(OwnerProfile())
     val ownerProfile: StateFlow<OwnerProfile> = _ownerProfile.asStateFlow()
@@ -221,32 +224,47 @@ class MainViewModel @JvmOverloads constructor(
             viewModelScope.launch {
                 vm.errorMessage.collect { _errorMessage.value = it }
             }
+            viewModelScope.launch {
+                vm.transcript.collect { _voiceTranscript.value = it }
+            }
         }
     }
 
     fun onMicPermissionResult(isGranted: Boolean) {
         _hasMicPermission.value = isGranted
         if (!isGranted) {
-            _errorMessage.value = "Microphone permission is required to listen to voice commands."
+            _errorMessage.value = "Microphone permission was denied. Enable it in Android Settings > Apps > BG > Permissions to use voice."
+            _assistantState.value = AssistantState.ERROR
         } else {
             _errorMessage.value = null
+            _assistantState.value = AssistantState.IDLE
         }
     }
 
     fun onOrbClicked(requestPermission: () -> Unit) {
         if (!_hasMicPermission.value) {
+            _assistantState.value = AssistantState.REQUESTING_PERMISSION
             requestPermission()
             return
         }
 
         val vm = voiceManager ?: return
         when (_assistantState.value) {
-            AssistantState.IDLE -> vm.startListening()
+            AssistantState.IDLE -> vm.startListening(_ownerProfile.value.preferredLanguage)
             AssistantState.LISTENING -> vm.stopListening()
             AssistantState.SPEAKING -> vm.stopAll()
-            AssistantState.PROCESSING -> Unit
-            AssistantState.ERROR -> vm.startListening()
+            AssistantState.PROCESSING, AssistantState.RECOGNIZING, AssistantState.EXECUTING,
+            AssistantState.WAITING_FOR_CONFIRMATION, AssistantState.REQUESTING_PERMISSION -> vm.stopAll()
+            AssistantState.ERROR, AssistantState.CANCELLED, AssistantState.PAUSED -> vm.startListening(_ownerProfile.value.preferredLanguage)
         }
+    }
+
+    fun startListening(languageCode: String = _ownerProfile.value.preferredLanguage) {
+        voiceManager?.startListening(languageCode)
+    }
+
+    fun cancelVoiceSession() {
+        voiceManager?.stopAll()
     }
 
     fun executeCommand(commandText: String) {

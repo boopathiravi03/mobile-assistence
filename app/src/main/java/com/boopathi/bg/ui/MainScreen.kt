@@ -1,6 +1,7 @@
 package com.boopathi.bg.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
@@ -38,6 +39,7 @@ fun MainScreen(
     onRequestPermission: () -> Unit
 ) {
     val assistantState by viewModel.assistantState.collectAsState()
+    val voiceTranscript by viewModel.voiceTranscript.collectAsState()
     val audioRmsDb by viewModel.audioRmsDb.collectAsState()
     val messages by viewModel.messages.collectAsState()
     val hasMicPermission by viewModel.hasMicPermission.collectAsState()
@@ -158,9 +160,11 @@ fun MainScreen(
 
                 // Assistant State Text Label
                 val stateTextColor = when (assistantState) {
-                    AssistantState.IDLE -> TextSecondary
+                    AssistantState.IDLE, AssistantState.CANCELLED, AssistantState.PAUSED,
+                    AssistantState.REQUESTING_PERMISSION -> TextSecondary
                     AssistantState.LISTENING -> NeonCyan
-                    AssistantState.PROCESSING -> PulseAmber
+                    AssistantState.PROCESSING, AssistantState.RECOGNIZING, AssistantState.EXECUTING,
+                    AssistantState.WAITING_FOR_CONFIRMATION -> PulseAmber
                     AssistantState.SPEAKING -> ElectricBlue
                     AssistantState.ERROR -> DangerRed
                 }
@@ -172,6 +176,26 @@ fun MainScreen(
                     fontWeight = FontWeight.Medium,
                     fontSize = 15.sp
                 )
+
+                if (voiceTranscript.isNotBlank()) {
+                    Text(
+                        text = "You said: $voiceTranscript",
+                        modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = TextSecondary
+                    )
+                }
+                if (assistantState in setOf(AssistantState.LISTENING, AssistantState.PROCESSING, AssistantState.SPEAKING)) {
+                    Text(
+                        text = "Stop",
+                        modifier = Modifier
+                            .padding(top = 8.dp)
+                            .clickable { viewModel.cancelVoiceSession() }
+                            .padding(horizontal = 20.dp, vertical = 8.dp),
+                        style = MaterialTheme.typography.labelLarge,
+                        color = DangerRed
+                    )
+                }
             }
         }
     }

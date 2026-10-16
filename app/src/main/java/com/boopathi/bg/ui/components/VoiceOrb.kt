@@ -69,18 +69,20 @@ fun VoiceOrb(
 
     // Dynamic scale based on state and microphone RMS volume
     val effectiveScale = when (state) {
-        AssistantState.IDLE -> idlePulse
+        AssistantState.IDLE, AssistantState.CANCELLED, AssistantState.PAUSED -> idlePulse
         AssistantState.LISTENING -> {
             val normalizedRms = (audioRmsDb.coerceIn(0f, 12f) / 12f)
             1.0f + (normalizedRms * 0.22f)
         }
-        AssistantState.PROCESSING -> idlePulse
+        AssistantState.PROCESSING, AssistantState.RECOGNIZING, AssistantState.EXECUTING,
+        AssistantState.WAITING_FOR_CONFIRMATION, AssistantState.REQUESTING_PERMISSION -> idlePulse
         AssistantState.SPEAKING -> idlePulse * 1.08f
         AssistantState.ERROR -> 1.0f
     }
 
     val (glowColors, coreColors, icon) = when (state) {
-        AssistantState.IDLE -> Triple(
+        AssistantState.IDLE, AssistantState.CANCELLED, AssistantState.PAUSED,
+        AssistantState.REQUESTING_PERMISSION -> Triple(
             listOf(NeonCyan.copy(alpha = 0.15f), Color.Transparent),
             listOf(ElectricBlue, NeonCyan),
             Icons.Default.Mic
@@ -90,7 +92,8 @@ fun VoiceOrb(
             listOf(NeonCyan, ElectricBlue),
             Icons.Default.Mic
         )
-        AssistantState.PROCESSING -> Triple(
+        AssistantState.PROCESSING, AssistantState.RECOGNIZING, AssistantState.EXECUTING,
+        AssistantState.WAITING_FOR_CONFIRMATION -> Triple(
             listOf(PulseAmber.copy(alpha = 0.35f), CyberPurple.copy(alpha = 0.15f)),
             listOf(PulseAmber, CyberPurple),
             Icons.Default.Psychology
