@@ -21,6 +21,7 @@ import com.boopathi.bg.service.recovery.UiMismatch
 import com.boopathi.bg.service.recovery.UiMismatchType
 import com.boopathi.bg.service.recovery.UiSnapshotObserver
 import com.boopathi.bg.service.recovery.UiStateSnapshot
+import com.boopathi.bg.service.security.MessageDispatchAuthorization
 
 /**
  * Bounded Multi-Step Execution Engine for Android App Automation (Phase 5A & Phase 6B).
@@ -46,17 +47,22 @@ class MultiStepAgent(
 
     private var activeJob: Job? = null
 
+    @Suppress("UNUSED_PARAMETER")
     fun cancelCurrentTask(reason: String = "User requested cancellation"): Boolean {
         val task = _currentTask.value
         if (task != null && !task.isComplete) {
-            Log.i(TAG, "Task ${task.taskId} cancelled: $reason")
+            Log.i(TAG, "Task cancellation requested.")
             task.state = AgentTaskState.CANCELLED
-            task.failureReason = reason
+            task.failureReason = "Cancellation requested. An external action already in progress may finish; check the target app before retrying."
             task.updatedAt = System.currentTimeMillis()
             _taskState.value = AgentTaskState.CANCELLED
             return true
         }
         return false
+    }
+
+    fun publishCurrentTaskState(task: AgentTask) {
+        if (_currentTask.value === task) _taskState.value = task.state
     }
 
     suspend fun executeTask(task: AgentTask): AgentTask = withContext(Dispatchers.Default) {
@@ -83,7 +89,7 @@ class MultiStepAgent(
         _taskState.value = AgentTaskState.PLANNING
         task.state = AgentTaskState.PLANNING
 
-        Log.i(TAG, "Starting task '${task.normalizedGoal}' (${task.steps.size} steps, max duration ${config.maxTaskDurationMs}ms)")
+        Log.i(TAG, "Starting task (${task.steps.size} steps, max duration ${config.maxTaskDurationMs}ms)")
 
         for (index in task.steps.indices) {
             if (!isActive || task.state == AgentTaskState.CANCELLED) {
@@ -108,7 +114,7 @@ class MultiStepAgent(
             context.currentStep = step
             step.status = StepStatus.RUNNING
 
-            Log.i(TAG, "Step ${index + 1}/${task.steps.size}: ${step.description} (${step.action.type})")
+            Log.i(TAG, "Step ${index + 1}/${task.steps.size}: ${step.action.type}")
 
             // 2. Risk Evaluation Policy Check
             val riskDecision = AgentExecutionPolicy.evaluateActionRisk(step.action)
@@ -131,6 +137,9 @@ class MultiStepAgent(
                             actionDescription = step.description,
                             riskLevel = RiskLevel.MEDIUM
                         )
+                        task.confirmationFingerprint = task.draft?.let { draft ->
+                            MessageDispatchAuthorization.confirmationFingerprint(task.taskId, draft, task.confirmationRequest!!)
+                        }
                         _taskState.value = AgentTaskState.WAITING_FOR_CONFIRMATION
                         Log.i(TAG, "Step ${index + 1} paused for confirmation: ${task.confirmationRequest?.reason}")
                         return@withContext task
@@ -163,6 +172,14 @@ class MultiStepAgent(
                 context.lastActionResult = actionResult
                 finalStepResult = actionResult
 
+                // Never continue into retries or recovery after cancellation while an action was in flight.
+                if (!isActive || task.state == AgentTaskState.CANCELLED) {
+                    task.state = AgentTaskState.CANCELLED
+                    task.failureReason = "Cancellation requested. An external action already in progress may finish; check the target app before retrying."
+                    _taskState.value = AgentTaskState.CANCELLED
+                    return@withContext task
+                }
+
                 if (actionResult.isSuccess) {
                     // Update execution context
                     context.currentPackage = appAgent.bridge.getCurrentPackage()
@@ -174,7 +191,7 @@ class MultiStepAgent(
                     stepSuccess = true
                     Log.i(TAG, "Step ${index + 1} succeeded & verified.")
                 } else {
-                    Log.w(TAG, "Step ${index + 1} failed: ${actionResult.status} (${actionResult.reason})")
+                    Log.w(TAG, "Step ${index + 1} failed: ${actionResult.status}")
 
                     // Non-retryable terminal statuses:
                     if (actionResult.status == AppActionResultStatus.REQUIRES_ACCESSIBILITY) {
@@ -219,6 +236,7 @@ class MultiStepAgent(
 
             // 4. Bounded Recovery Layer (Phase 6B)
             if (!stepSuccess) {
+                if (!isActive || task.state == AgentTaskState.CANCELLED) return@withContext task
                 var recovered = false
                 val recoveryStartTimeMs = System.currentTimeMillis()
                 var stepRecoveryAttempts = 0
@@ -230,6 +248,7 @@ class MultiStepAgent(
                     else -> UiMismatchType.EXPECTED_STATE_NOT_REACHED
                 }
 
+                if (!isActive || task.state == AgentTaskState.CANCELLED) return@withContext task
                 val currentSnapshot = snapshotObserver.captureSnapshot()
                 val mismatch = UiMismatch(
                     type = failureMismatchType,
@@ -246,7 +265,7 @@ class MultiStepAgent(
                         totalRecoveryCount = task.recoveryAttemptCount,
                         recoveryStartTimeMs = recoveryStartTimeMs,
                         action = step.action
-                    ).allowed && !recovered) {
+                    ).allowed && !recovered && isActive && task.state != AgentTaskState.CANCELLED) {
 
                     stepRecoveryAttempts++
                     task.recoveryAttemptCount++
@@ -265,15 +284,19 @@ class MultiStepAgent(
                         recoveryStartTimeMs = recoveryStartTimeMs
                     )
 
+                    if (!isActive || task.state == AgentTaskState.CANCELLED) return@withContext task
+
                     if (!proposal.isExecutable || proposal.recoverySteps.isEmpty()) {
-                        Log.w(TAG, "Recovery proposal cannot be executed: ${proposal.explanation}")
+                        Log.w(TAG, "Recovery proposal cannot be executed.")
                         break
                     }
 
                     // Execute recovery steps sequentially
                     var recoveryStepsSucceeded = true
                     for (recStep in proposal.recoverySteps) {
+                        if (!isActive || task.state == AgentTaskState.CANCELLED) return@withContext task
                         val recResult = appAgent.executeAction(recStep.action)
+                        if (!isActive || task.state == AgentTaskState.CANCELLED) return@withContext task
                         if (!recResult.isSuccess) {
                             recoveryStepsSucceeded = false
                             break
@@ -282,7 +305,9 @@ class MultiStepAgent(
 
                     if (recoveryStepsSucceeded) {
                         // Retry original step action once after recovery
+                        if (!isActive || task.state == AgentTaskState.CANCELLED) return@withContext task
                         val retryActionResult = appAgent.executeAction(step.action)
+                        if (!isActive || task.state == AgentTaskState.CANCELLED) return@withContext task
                         if (retryActionResult.isSuccess) {
                             step.status = StepStatus.SUCCESS
                             stepSuccess = true
@@ -298,17 +323,23 @@ class MultiStepAgent(
                     task.state = AgentTaskState.FAILED
                     task.failureReason = finalStepResult?.reason ?: "Step ${index + 1} failed verification."
                     _taskState.value = AgentTaskState.FAILED
-                    Log.w(TAG, "Task '${task.normalizedGoal}' terminated at step ${index + 1}: ${task.failureReason}")
+                    Log.w(TAG, "Task terminated at step ${index + 1}.")
                     return@withContext task
                 }
             }
         }
 
         // 5. Completion
+        if (!isActive || task.state == AgentTaskState.CANCELLED) {
+            task.state = AgentTaskState.CANCELLED
+            task.failureReason = "Cancellation requested. An external action already in progress may finish; check the target app before retrying."
+            _taskState.value = AgentTaskState.CANCELLED
+            return@withContext task
+        }
         task.state = AgentTaskState.SUCCESS
         task.updatedAt = System.currentTimeMillis()
         _taskState.value = AgentTaskState.SUCCESS
-        Log.i(TAG, "Task '${task.normalizedGoal}' completed successfully.")
+        Log.i(TAG, "Task completed successfully.")
         task
     }
 }

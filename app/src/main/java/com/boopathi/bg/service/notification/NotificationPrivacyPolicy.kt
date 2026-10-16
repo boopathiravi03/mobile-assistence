@@ -46,7 +46,10 @@ object NotificationPrivacyPolicy {
     fun sanitize(info: NotificationInfo): NotificationInfo {
         if (isSensitive(info.title, info.text)) {
             return info.copy(
+                title = "Sensitive notification",
                 text = "Sensitive authentication/transaction details hidden for privacy.",
+                senderName = "",
+                conversationKey = "",
                 isRedacted = true
             )
         }

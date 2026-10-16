@@ -96,7 +96,7 @@ CRITICAL RULES:
                         Log.d(TAG, "AI plan validated successfully: ${structuredPlan.goal.normalizedGoal}")
                         return validation.validatedPlan
                     } else {
-                        Log.w(TAG, "AI plan rejected by local policy: ${validation.rejectionReason}")
+                        Log.w(TAG, "AI plan rejected by local policy.")
                         return structuredPlan.copy(
                             status = AgentPlanStatus.REJECTED,
                             explanation = validation.rejectionReason ?: "Plan was rejected by safety policy."
@@ -104,7 +104,7 @@ CRITICAL RULES:
                     }
                 }
             } catch (e: Exception) {
-                Log.w(TAG, "AI dynamic planning failed safely: ${e.message}")
+                Log.w(TAG, "AI dynamic planning failed safely (${e.javaClass.simpleName})")
             }
         }
 
@@ -454,7 +454,7 @@ CRITICAL RULES:
                 status = AgentPlanStatus.PROPOSED
             )
         } catch (e: Exception) {
-            Log.w(TAG, "Failed to parse AgentPlan JSON: ${e.message}")
+            Log.w(TAG, "Failed to parse AgentPlan JSON (${e.javaClass.simpleName})")
             null
         }
     }

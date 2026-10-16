@@ -42,13 +42,13 @@ class ToolRegistry {
         }
 
         return try {
-            Log.d(TAG, "Executing tool [${tool.name}] with params: $parameters")
+            Log.d(TAG, "Executing tool [${tool.name}] with ${parameters.size} parameters")
             tool.execute(parameters)
         } catch (e: Exception) {
-            Log.e(TAG, "Error executing tool [${tool.name}]: ${e.message}", e)
+            Log.e(TAG, "Error executing tool [${tool.name}] (${e.javaClass.simpleName})")
             ToolResult(
                 status = ToolStatus.FAILED,
-                message = "Failed to execute ${tool.name}: ${e.message}",
+                message = "Failed to execute ${tool.name}.",
                 toolName = tool.name
             )
         }

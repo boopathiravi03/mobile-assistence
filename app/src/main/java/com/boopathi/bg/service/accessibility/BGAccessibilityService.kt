@@ -86,7 +86,7 @@ class BGAccessibilityService : AccessibilityService() {
         try {
             traverseNode(root, 0, elements)
         } catch (e: Exception) {
-            Log.e(TAG, "Error traversing accessibility tree: ${e.message}", e)
+            Log.e(TAG, "Error traversing accessibility tree (${e.javaClass.simpleName})")
         }
         return elements
     }

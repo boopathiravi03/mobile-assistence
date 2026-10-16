@@ -90,7 +90,7 @@ class GeminiProvider(
                     isSuccess = false
                 )
             } catch (e: Exception) {
-                Log.w(TAG, "Gemini execution failed safely: ${e.javaClass.simpleName} - ${e.message}")
+                Log.w(TAG, "Gemini execution failed safely (${e.javaClass.simpleName})")
                 CommandResult(
                     textResponse = FALLBACK_FAIL_MESSAGE,
                     providerName = name,
@@ -198,7 +198,7 @@ class GeminiProvider(
                 null
             }
         } catch (e: Exception) {
-            Log.w(TAG, "Error executing request with model $model: ${e.message}")
+            Log.w(TAG, "Error executing request with model $model (${e.javaClass.simpleName})")
             null
         }
     }

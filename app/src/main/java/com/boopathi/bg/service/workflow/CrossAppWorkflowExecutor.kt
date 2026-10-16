@@ -32,7 +32,8 @@ class CrossAppWorkflowExecutor(
     private val multiStepAgent: MultiStepAgent? = null,
     private val toolRegistry: ToolRegistry? = null,
     private val handoffVerifier: CrossAppHandoffVerifier = CrossAppHandoffVerifier(appAgent.bridge),
-    private val messagingAdapter: MessagingAppAdapter = WhatsAppMessagingAdapter()
+    private val messagingAdapter: MessagingAppAdapter = WhatsAppMessagingAdapter(),
+    private val workflowValidator: CrossAppWorkflowValidator = CrossAppWorkflowValidator()
 ) {
 
     companion object {
@@ -50,17 +51,18 @@ class CrossAppWorkflowExecutor(
 
     private var activeContext: WorkflowContext? = null
 
+    @Suppress("UNUSED_PARAMETER")
     fun cancelWorkflow(reason: String = "User requested cancellation"): Boolean {
         val wf = _currentWorkflow.value
         if (wf != null && !wf.isComplete) {
-            Log.i(TAG, "Workflow ${wf.workflowId} cancelled: $reason")
+            Log.i(TAG, "Workflow cancellation requested.")
             val cancelledWf = wf.copy(
                 status = CrossAppWorkflowStatus.CANCELLED,
-                failureReason = reason
+                failureReason = "Cancellation requested. An action already in progress may finish; check the target app before retrying."
             )
             _currentWorkflow.value = cancelledWf
             _workflowStatus.value = CrossAppWorkflowStatus.CANCELLED
-            _progressMessage.value = "Stopped safely: $reason"
+            _progressMessage.value = "Cancellation requested. An action already in progress may finish; check the target app before retrying."
             activeContext?.isCancelled = true
             activeContext?.clearTransientData()
             return true
@@ -83,8 +85,18 @@ class CrossAppWorkflowExecutor(
             )
         }
 
+        val validation = workflowValidator.validateWorkflow(workflow)
+        val validatedWorkflow = validation.validatedWorkflow
+        if (!validation.isValid || validatedWorkflow == null) {
+            return@withContext CommandResult(
+                textResponse = validation.rejectionReason ?: "Workflow did not pass local safety checks.",
+                providerName = "CrossAppWorkflowValidator",
+                isSuccess = false
+            )
+        }
+
         val startTime = System.currentTimeMillis()
-        var currentWf = workflow.copy(status = CrossAppWorkflowStatus.EXECUTING)
+        var currentWf = validatedWorkflow.copy(status = CrossAppWorkflowStatus.EXECUTING)
         _currentWorkflow.value = currentWf
         _workflowStatus.value = CrossAppWorkflowStatus.EXECUTING
 
@@ -94,8 +106,18 @@ class CrossAppWorkflowExecutor(
         )
         activeContext = context
 
-        _progressMessage.value = "Starting workflow: ${currentWf.goalDescription}"
-        Log.i(TAG, "Executing CrossAppWorkflow '${currentWf.goalDescription}' (${currentWf.totalSteps} steps)")
+        _progressMessage.value = "Starting workflow (${currentWf.totalSteps} steps)."
+        Log.i(TAG, "Executing validated CrossAppWorkflow (${currentWf.totalSteps} steps)")
+
+        fun cancelledResult(): CommandResult {
+            currentWf = currentWf.copy(status = CrossAppWorkflowStatus.CANCELLED,
+                failureReason = "Cancellation requested. An action already in progress may finish; check the target app before retrying.")
+            _currentWorkflow.value = currentWf
+            _workflowStatus.value = CrossAppWorkflowStatus.CANCELLED
+            _progressMessage.value = currentWf.failureReason.orEmpty()
+            context.clearTransientData()
+            return CommandResult(currentWf.failureReason.orEmpty(), providerName = "CrossAppWorkflow", isSuccess = false)
+        }
 
         for ((index, step) in currentWf.steps.withIndex()) {
             if (context.isCancelled || currentWf.status == CrossAppWorkflowStatus.CANCELLED) {
@@ -131,7 +153,7 @@ class CrossAppWorkflowExecutor(
             context.currentStepIndex = index
 
             _progressMessage.value = "Step ${index + 1}/${currentWf.totalSteps}: ${step.expectedOutcome}"
-            Log.d(TAG, "Running step ${index + 1}: ${step.actionReference} on ${step.targetApp}")
+            Log.d(TAG, "Running workflow step ${index + 1}: ${step.actionReference}")
 
             val expectedPkg = step.expectedPackage ?: ""
 
@@ -139,6 +161,7 @@ class CrossAppWorkflowExecutor(
             if (step.actionReference == "OPEN_APP") {
                 _progressMessage.value = "Opening ${step.targetApp}..."
                 val openResult = appAgent.executeAction(AppAction.OpenApp(step.targetApp))
+                if (context.isCancelled) return@withContext cancelledResult()
                 if (!openResult.isSuccess) {
                     val failMsg = "Failed to open ${step.targetApp}: ${openResult.reason ?: "App unavailable"}"
                     return@withContext failWorkflow(currentWf, context, failMsg)
@@ -161,6 +184,7 @@ class CrossAppWorkflowExecutor(
             } else if (step.actionReference == "INSPECT_SCREEN") {
                 // Ensure foreground package has not changed unexpectedly
                 val fgCheck = handoffVerifier.verifyForegroundApp(expectedPkg, step.targetApp)
+                if (context.isCancelled) return@withContext cancelledResult()
                 if (fgCheck !is HandoffVerificationResult.Success) {
                     val failMsg = "Unexpected foreground app during inspection. Expected $expectedPkg."
                     return@withContext failWorkflow(currentWf, context, failMsg)
@@ -168,6 +192,7 @@ class CrossAppWorkflowExecutor(
 
                 _progressMessage.value = "Inspecting ${step.targetApp}..."
                 val inspectResult = appAgent.executeAction(AppAction.InspectUi)
+                if (context.isCancelled) return@withContext cancelledResult()
                 if (!inspectResult.isSuccess) {
                     val failMsg = "Failed to inspect ${step.targetApp}: ${inspectResult.reason}"
                     return@withContext failWorkflow(currentWf, context, failMsg)
@@ -181,6 +206,7 @@ class CrossAppWorkflowExecutor(
 
                 // Verify foreground package first
                 val fgCheck = handoffVerifier.verifyForegroundApp(expectedPkg, step.targetApp)
+                if (context.isCancelled) return@withContext cancelledResult()
                 if (fgCheck !is HandoffVerificationResult.Success) {
                     return@withContext failWorkflow(currentWf, context, "Destination app $expectedPkg is not active.")
                 }
@@ -211,6 +237,7 @@ class CrossAppWorkflowExecutor(
                         textToType = textToTransfer
                     )
                 )
+                if (context.isCancelled) return@withContext cancelledResult()
 
                 if (!typeResult.isSuccess) {
                     return@withContext failWorkflow(
@@ -243,6 +270,7 @@ class CrossAppWorkflowExecutor(
 
                 // Verify recipient in conversation
                 val recipientVerified = messagingAdapter.verifyRecipient(appAgent.bridge, recipient)
+                if (context.isCancelled) return@withContext cancelledResult()
                 if (!recipientVerified) {
                     return@withContext failWorkflow(
                         currentWf,
@@ -257,6 +285,7 @@ class CrossAppWorkflowExecutor(
                 val draftPrepared = if (inputElement != null) {
                     appAgent.bridge.typeText(inputElement, messageText)
                 } else false
+                if (context.isCancelled) return@withContext cancelledResult()
 
                 if (!draftPrepared) {
                     return@withContext failWorkflow(
@@ -302,7 +331,7 @@ class CrossAppWorkflowExecutor(
         context: WorkflowContext,
         reason: String
     ): CommandResult {
-        Log.w(TAG, "Workflow failed: $reason")
+        Log.w(TAG, "Workflow failed.")
         val failed = wf.copy(
             status = CrossAppWorkflowStatus.FAILED,
             failureReason = reason

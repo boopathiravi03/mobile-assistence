@@ -48,9 +48,20 @@ class AgentPlanExecutor(
             )
         }
 
+        // Plans are untrusted data. Re-run local policy immediately before any tool or UI action.
+        val validation = AgentPlanValidator().validatePlan(plan)
+        val checkedPlan = validation.validatedPlan
+        if (!validation.isValid || checkedPlan == null) {
+            return CommandResult(
+                textResponse = validation.rejectionReason ?: "That plan did not pass the local safety checks.",
+                providerName = "AgentPlanValidator",
+                isSuccess = false
+            )
+        }
+
         // Single step device tool execution
-        if (plan.steps.size == 1 && plan.steps[0].action == PlannedAction.DEVICE_TOOL) {
-            val step = plan.steps[0]
+        if (checkedPlan.steps.size == 1 && checkedPlan.steps[0].action == PlannedAction.DEVICE_TOOL) {
+            val step = checkedPlan.steps[0]
             val toolName = step.parameters["tool"] ?: step.target ?: ""
             if (toolRegistry != null) {
                 val toolResult = toolRegistry.execute(toolName, step.parameters)
@@ -64,7 +75,7 @@ class AgentPlanExecutor(
         }
 
         // Notification reading
-        if (plan.steps.any { it.action == PlannedAction.READ_NOTIFICATION }) {
+        if (checkedPlan.steps.any { it.action == PlannedAction.READ_NOTIFICATION }) {
             if (notificationAccessManager != null && notificationAccessManager.isAccessGranted()) {
                 val notifs = notificationAccessManager.repository.getRecentNotifications()
                 val response = if (notifs.isEmpty()) {
@@ -88,9 +99,9 @@ class AgentPlanExecutor(
         }
 
         // Bridge to MultiStepAgent
-        val agentTask = convertPlanToAgentTask(plan)
+        val agentTask = convertPlanToAgentTask(checkedPlan)
         if (multiStepAgent != null) {
-            Log.d(TAG, "Executing plan '${plan.goal.normalizedGoal}' via MultiStepAgent (${agentTask.totalSteps} steps)")
+            Log.d(TAG, "Executing validated plan via MultiStepAgent (${agentTask.totalSteps} steps)")
             val executedTask = multiStepAgent.executeTask(agentTask)
 
             val responseText = formatTaskResponse(executedTask, owner)
@@ -104,7 +115,7 @@ class AgentPlanExecutor(
 
         // Fallback: If MultiStepAgent is not provided but AppAgent is provided, execute step by step
         if (appAgent != null) {
-            Log.d(TAG, "Executing plan '${plan.goal.normalizedGoal}' via AppAgent fallback")
+            Log.d(TAG, "Executing validated plan via AppAgent fallback")
             for (step in agentTask.steps) {
                 val result = appAgent.executeAction(step.action)
                 if (!result.isSuccess) {
@@ -117,7 +128,7 @@ class AgentPlanExecutor(
                 }
             }
             return CommandResult(
-                textResponse = "Completed: ${plan.goal.normalizedGoal}",
+                textResponse = "Completed the validated plan.",
                 providerName = "AgentPlanExecutor",
                 isSuccess = true
             )

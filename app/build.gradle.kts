@@ -36,6 +36,9 @@ android {
     buildTypes {
         release {
             isMinifyEnabled = false
+            // Provider keys are client-visible in any APK; never package developer keys in release builds.
+            buildConfigField("String", "GEMINI_API_KEY", "\"\"")
+            buildConfigField("String", "GROQ_API_KEY", "\"\"")
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"

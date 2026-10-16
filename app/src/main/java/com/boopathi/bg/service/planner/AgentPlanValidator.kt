@@ -11,6 +11,9 @@ class AgentPlanValidator {
     companion object {
         const val MAX_STEPS = 10
         const val MIN_STEPS = 1
+        private const val MAX_GOAL_LENGTH = 2_000
+        private const val MAX_FIELD_LENGTH = 1_000
+        private const val MAX_PARAMETERS = 16
 
         private val SUPPORTED_PACKAGES = setOf(
             "com.whatsapp",
@@ -53,6 +56,11 @@ class AgentPlanValidator {
     }
 
     fun validatePlan(plan: AgentPlan): PlanValidationResult {
+        if (plan.goal.rawInput.length > MAX_GOAL_LENGTH || plan.goal.normalizedGoal.length > MAX_GOAL_LENGTH ||
+            plan.goal.entities.size > MAX_PARAMETERS || plan.goal.entities.any { (key, value) -> key.length > 80 || value.length > MAX_FIELD_LENGTH }) {
+            return PlanValidationResult(false, null, "Plan contains oversized goal data.")
+        }
+
         // Step count bounds check: 1..10
         if (plan.steps.size < MIN_STEPS) {
             return PlanValidationResult(
@@ -68,6 +76,14 @@ class AgentPlanValidator {
                 validatedPlan = null,
                 rejectionReason = "That task is too large for one operation. I need to break it into smaller steps."
             )
+        }
+
+        if (plan.steps.map { it.stepId }.any(String::isBlank) || plan.steps.map { it.stepId }.distinct().size != plan.steps.size ||
+            plan.steps.any { step ->
+                step.stepId.length > 80 || step.description.length > 400 || (step.target?.length ?: 0) > MAX_FIELD_LENGTH ||
+                    step.parameters.size > MAX_PARAMETERS || step.parameters.any { (key, value) -> key.length > 80 || value.length > MAX_FIELD_LENGTH }
+            }) {
+            return PlanValidationResult(false, null, "Plan contains malformed or oversized step data.")
         }
 
         var overallRisk = AgentPlanRisk.LOW
@@ -129,6 +145,11 @@ class AgentPlanValidator {
         val textParam = step.parameters["text"]?.trim().orEmpty()
         val combinedContent = "$target $textParam ${step.parameters.values.joinToString(" ")}".lowercase()
 
+        if (step.parameters.keys.any { it.contains("shell", true) || it.contains("script", true) || it.contains("command", true) || it.contains("coordinate", true) } ||
+            Regex("(?:\\b(?:x|y)\\s*[:=]|\\b(?:tap|click)\\s*\\(\\s*\\d+\\s*,|coordinates?)", RegexOption.IGNORE_CASE).containsMatchIn(combinedContent)) {
+            return StepSafetyResult(false, AgentPlanRisk.HIGH, false, "Step $stepNumber contains an unsupported command or coordinate target.")
+        }
+
         // 1. Check for strictly blocked sensitive keywords (OTP, PIN, passwords, banking)
         for (kw in SENSITIVE_KEYWORDS) {
             if (combinedContent.contains(kw)) {
@@ -156,12 +177,12 @@ class AgentPlanValidator {
         // 3. Action-specific validation
         return when (step.action) {
             PlannedAction.OPEN_APP -> {
-                if (target.isBlank()) {
+                if (target.isBlank() || !isSupportedApp(target)) {
                     StepSafetyResult(
                         isAllowed = false,
                         calculatedRisk = AgentPlanRisk.LOW,
                         requiresConfirmation = false,
-                        rejectionReason = "Step $stepNumber: App target name is missing."
+                        rejectionReason = "Step $stepNumber: App target is missing or unsupported."
                     )
                 } else {
                     StepSafetyResult(
@@ -172,7 +193,6 @@ class AgentPlanValidator {
                 }
             }
 
-            PlannedAction.WAIT_FOR_WINDOW,
             PlannedAction.INSPECT_UI,
             PlannedAction.SCROLL,
             PlannedAction.BACK,
@@ -185,6 +205,15 @@ class AgentPlanValidator {
                     calculatedRisk = AgentPlanRisk.LOW,
                     requiresConfirmation = false
                 )
+            }
+
+            PlannedAction.WAIT_FOR_WINDOW -> {
+                if (!isSupportedApp(target)) {
+                    StepSafetyResult(false, AgentPlanRisk.LOW, false,
+                        "Step $stepNumber waits for an unsupported app.")
+                } else {
+                    StepSafetyResult(true, AgentPlanRisk.LOW, false)
+                }
             }
 
             PlannedAction.TAP -> {
@@ -207,7 +236,7 @@ class AgentPlanValidator {
             }
 
             PlannedAction.TYPE_TEXT -> {
-                if (target.isBlank() && textParam.isBlank()) {
+                if (target.isBlank() || textParam.isBlank()) {
                     return StepSafetyResult(
                         isAllowed = false,
                         calculatedRisk = AgentPlanRisk.LOW,
@@ -243,7 +272,11 @@ class AgentPlanValidator {
 
             PlannedAction.PREPARE_MESSAGE -> {
                 val recipient = step.parameters["recipient"] ?: target
-                if (recipient.isBlank()) {
+                val message = step.parameters["message"] ?: textParam
+                val app = step.parameters["app"] ?: "WhatsApp"
+                if (!com.boopathi.bg.service.messaging.MessagingPolicy.isValidRecipient(recipient) ||
+                    message.isBlank() || message.length > com.boopathi.bg.service.messaging.MessagingPolicy.MAX_MESSAGE_LENGTH ||
+                    app !in com.boopathi.bg.service.messaging.MessagingPolicy.SUPPORTED_APPS) {
                     StepSafetyResult(
                         isAllowed = false,
                         calculatedRisk = AgentPlanRisk.LOW,
@@ -262,8 +295,12 @@ class AgentPlanValidator {
             PlannedAction.SEND_MESSAGE -> {
                 val recipient = step.parameters["recipient"] ?: target
                 val messageText = step.parameters["message"] ?: textParam
+                val app = step.parameters["app"] ?: "WhatsApp"
 
-                if (recipient.isBlank()) {
+                if (!com.boopathi.bg.service.messaging.MessagingPolicy.isValidRecipient(recipient) ||
+                    messageText.isBlank() || messageText.length > com.boopathi.bg.service.messaging.MessagingPolicy.MAX_MESSAGE_LENGTH ||
+                    app !in com.boopathi.bg.service.messaging.MessagingPolicy.SUPPORTED_APPS ||
+                    !com.boopathi.bg.service.messaging.MessagingPolicy.isContentSafeToSend(messageText)) {
                     return StepSafetyResult(
                         isAllowed = false,
                         calculatedRisk = AgentPlanRisk.MEDIUM,
@@ -280,6 +317,11 @@ class AgentPlanValidator {
                 )
             }
         }
+    }
+
+    private fun isSupportedApp(value: String): Boolean {
+        val clean = value.trim().lowercase()
+        return clean in COMMON_APP_NAMES || clean in SUPPORTED_PACKAGES
     }
 }
 

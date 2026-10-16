@@ -64,7 +64,7 @@ CRITICAL BOUNDS & RULES:
         if (deterministic != null) {
             val validation = validator.validateWorkflow(deterministic)
             if (validation.isValid && validation.validatedWorkflow != null) {
-                Log.d(TAG, "Deterministic workflow planned & validated: ${deterministic.goalDescription}")
+                Log.d(TAG, "Deterministic workflow planned & validated (${deterministic.totalSteps} steps)")
                 return validation.validatedWorkflow
             }
         }
@@ -79,11 +79,11 @@ CRITICAL BOUNDS & RULES:
                         Log.d(TAG, "AI workflow planned & validated: ${aiWorkflow.goalDescription}")
                         return validation.validatedWorkflow
                     } else {
-                        Log.w(TAG, "AI workflow rejected by safety policy: ${validation.rejectionReason}")
+                        Log.w(TAG, "AI workflow rejected by local safety policy.")
                     }
                 }
             } catch (e: Exception) {
-                Log.w(TAG, "AI workflow planning failed: ${e.message}")
+                Log.w(TAG, "AI workflow planning failed (${e.javaClass.simpleName})")
             }
         }
 
@@ -350,7 +350,7 @@ CRITICAL BOUNDS & RULES:
                 status = CrossAppWorkflowStatus.READY
             )
         } catch (e: Exception) {
-            Log.w(TAG, "Failed to parse structured AI workflow response: ${e.message}")
+            Log.w(TAG, "Failed to parse structured AI workflow response (${e.javaClass.simpleName})")
             null
         }
     }

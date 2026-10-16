@@ -61,6 +61,10 @@ class CrossAppWorkflowValidator {
         private val FORBIDDEN_COORDINATE_KEYWORDS = listOf(
             "coordinate", "tap(", "click(", "x,y", "point", "pixels"
         )
+
+        private val ALLOWED_ACTIONS = setOf("OPEN_APP", "INSPECT_SCREEN", "TRANSFER_TEXT", "PREPARE_MESSAGE")
+        private const val MAX_TEXT_LENGTH = 2_000
+        private const val MAX_PARAMETER_COUNT = 12
     }
 
     fun resolvePackage(appNameOrPkg: String): String? {
@@ -70,6 +74,16 @@ class CrossAppWorkflowValidator {
     }
 
     fun validateWorkflow(workflow: CrossAppWorkflow): WorkflowValidationResult {
+        if (workflow.workflowId.isBlank() || workflow.workflowId.length > 100 ||
+            workflow.goalDescription.length > MAX_TEXT_LENGTH ||
+            workflow.steps.any { step ->
+                step.id.isBlank() || step.id.length > 100 || step.targetApp.length > 100 ||
+                    step.expectedOutcome.length > 500 || step.actionReference.length > 60 ||
+                    step.parameters.size > MAX_PARAMETER_COUNT ||
+                    step.parameters.any { (key, value) -> key.length > 80 || value.length > MAX_TEXT_LENGTH }
+            }) {
+            return WorkflowValidationResult(false, rejectionReason = "Workflow contains malformed or oversized data.")
+        }
         // 1. Bounds checks
         if (workflow.steps.isEmpty()) {
             return WorkflowValidationResult(
@@ -100,11 +114,14 @@ class CrossAppWorkflowValidator {
 
             // 2. Validate App / Package
             val resolvedPkg = step.expectedPackage ?: resolvePackage(step.targetApp)
-            if (resolvedPkg == null && step.targetApp.isNotBlank()) {
+            if (resolvedPkg == null) {
                 return WorkflowValidationResult(
                     isValid = false,
                     rejectionReason = "Step $stepNumber targets unsupported app or package: '${step.targetApp}'."
                 )
+            }
+            if (step.expectedPackage != null && step.expectedPackage != resolvePackage(step.targetApp)) {
+                return WorkflowValidationResult(false, rejectionReason = "Step $stepNumber has an unsupported app target.")
             }
 
             // 3. Prohibit shell execution & coordinates
@@ -123,6 +140,10 @@ class CrossAppWorkflowValidator {
                     isValid = false,
                     rejectionReason = "Step $stepNumber attempts coordinate-based screen interaction."
                 )
+            }
+
+            if (step.actionReference.uppercase() !in ALLOWED_ACTIONS) {
+                return WorkflowValidationResult(false, rejectionReason = "Step $stepNumber contains an unsupported action.")
             }
 
             // 4. Prohibit credentials, OTP, and passwords in parameters

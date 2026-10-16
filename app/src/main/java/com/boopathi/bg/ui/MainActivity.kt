@@ -18,9 +18,18 @@ import com.boopathi.bg.ui.theme.BGTheme
 class MainActivity : ComponentActivity() {
 
     private val viewModel: MainViewModel by viewModels()
+    private val credentialConfirmationLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        viewModel.onDeviceCredentialAuthResult(result.resultCode)
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        viewModel.attachDeviceCredentialAuthLauncher { intent ->
+            credentialConfirmationLauncher.launch(intent)
+        }
 
         viewModel.initVoiceManager(this)
         viewModel.onNotificationPermissionResult()

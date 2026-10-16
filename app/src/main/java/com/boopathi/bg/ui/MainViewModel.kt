@@ -33,6 +33,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import com.boopathi.bg.data.local.entity.TaskEntity
 import com.boopathi.bg.service.reminder.ReminderManager
 import com.boopathi.bg.service.reminder.ReminderNotifications
@@ -45,8 +47,22 @@ class MainViewModel @JvmOverloads constructor(
     customOwnerAuthGate: com.boopathi.bg.service.security.OwnerAuthGate? = null
 ) : AndroidViewModel(application) {
 
-    val ownerAuthGate: com.boopathi.bg.service.security.OwnerAuthGate =
-        customOwnerAuthGate ?: com.boopathi.bg.service.security.SimpleOwnerAuthGate()
+    @Volatile
+    var ownerAuthGate: com.boopathi.bg.service.security.OwnerAuthGate =
+        customOwnerAuthGate ?: com.boopathi.bg.service.security.UnavailableOwnerAuthGate()
+        private set
+
+    private val confirmationMutex = Mutex()
+    private val deviceCredentialOwnerAuthGate = com.boopathi.bg.service.security.DeviceCredentialOwnerAuthGate(application)
+
+    internal fun attachDeviceCredentialAuthLauncher(launch: (Intent) -> Unit) {
+        deviceCredentialOwnerAuthGate.attachLauncher(launch)
+        ownerAuthGate = deviceCredentialOwnerAuthGate
+    }
+
+    internal fun onDeviceCredentialAuthResult(resultCode: Int) {
+        deviceCredentialOwnerAuthGate.onActivityResult(resultCode)
+    }
 
     // Clean Architecture: Tool Registry with Phase 3 Android Tools
     val toolRegistry: ToolRegistry = customToolRegistry ?: ToolRegistry().apply {
@@ -342,88 +358,90 @@ class MainViewModel @JvmOverloads constructor(
     }
 
     fun confirmAction() {
-        val task = multiStepAgent.currentTask.value
-        if (task != null && task.state == com.boopathi.bg.service.agent.AgentTaskState.WAITING_FOR_CONFIRMATION) {
-            viewModelScope.launch {
-                // 1. Freshness Check: Confirmation must not be expired (max 60 seconds)
+        viewModelScope.launch {
+            confirmationMutex.withLock {
+                val task = multiStepAgent.currentTask.value ?: return@withLock
+                if (task.state != com.boopathi.bg.service.agent.AgentTaskState.WAITING_FOR_CONFIRMATION) return@withLock
+
+                suspend fun reject(message: String, blocked: Boolean = false) {
+                    task.state = if (blocked) com.boopathi.bg.service.agent.AgentTaskState.BLOCKED else com.boopathi.bg.service.agent.AgentTaskState.FAILED
+                    task.failureReason = message
+                    multiStepAgent.publishCurrentTaskState(task)
+                    memoryManager.logInteraction("Confirm", message)
+                }
+
                 if (!com.boopathi.bg.service.messaging.MessagingPolicy.isConfirmationFresh(task.confirmationCreatedAt)) {
-                    val expireMsg = "That confirmation expired. Please request again."
-                    task.state = com.boopathi.bg.service.agent.AgentTaskState.FAILED
-                    task.failureReason = expireMsg
-                    memoryManager.logInteraction("Confirm", expireMsg)
-                    return@launch
+                    reject("That confirmation expired. Please request again.")
+                    return@withLock
                 }
-
-                // 2. Draft & Recipient Validation
                 val draft = task.draft
-                if (draft == null || draft.recipient.isBlank() || draft.messageText.isBlank()) {
-                    val err = "Draft details are missing or invalid."
-                    task.state = com.boopathi.bg.service.agent.AgentTaskState.FAILED
-                    task.failureReason = err
-                    memoryManager.logInteraction("Confirm", err)
-                    return@launch
+                if (draft == null || !com.boopathi.bg.service.messaging.MessagingPolicy.isValidRecipient(draft.recipient) ||
+                    draft.messageText.isBlank() || draft.messageText.length > com.boopathi.bg.service.messaging.MessagingPolicy.MAX_MESSAGE_LENGTH ||
+                    draft.sourceApp !in com.boopathi.bg.service.messaging.MessagingPolicy.SUPPORTED_APPS) {
+                    reject("Draft details are missing or unsupported.", blocked = true)
+                    return@withLock
                 }
-
-                // 3. Sensitive / Financial Content Safety
+                val request = task.confirmationRequest
+                if (request == null) {
+                    reject("The reviewed message changed. Prepare and review it again.", blocked = true)
+                    return@withLock
+                }
+                val expectedActionFingerprint = com.boopathi.bg.service.security.MessageDispatchAuthorization.fingerprint(task.taskId, draft)
+                val expectedConfirmationFingerprint = com.boopathi.bg.service.security.MessageDispatchAuthorization.confirmationFingerprint(task.taskId, draft, request)
+                if (task.confirmationFingerprint != expectedConfirmationFingerprint) {
+                    reject("The reviewed message changed. Prepare and review it again.", blocked = true)
+                    return@withLock
+                }
                 if (!com.boopathi.bg.service.messaging.MessagingPolicy.isContentSafeToSend(draft.messageText)) {
-                    val blockedMsg = "I can't send messages containing sensitive authentication or financial information."
-                    task.state = com.boopathi.bg.service.agent.AgentTaskState.BLOCKED
-                    task.failureReason = blockedMsg
-                    memoryManager.logInteraction("Confirm", blockedMsg)
-                    return@launch
+                    reject("I can't send messages containing sensitive authentication or financial information.", blocked = true)
+                    return@withLock
                 }
-
-                // 4. Duplicate-Send Prevention: Check if send action already executed for this task
                 if (task.sendExecuted) {
-                    val dupMsg = "Message send action was already attempted. No duplicate send will be executed."
-                    task.state = com.boopathi.bg.service.agent.AgentTaskState.FAILED
-                    task.failureReason = dupMsg
-                    memoryManager.logInteraction("Confirm", dupMsg)
-                    return@launch
+                    reject("A send was already attempted. Check WhatsApp before trying again.")
+                    return@withLock
                 }
-
-                // 5. Phase 5C Policy Check
                 if (!com.boopathi.bg.service.messaging.MessagingPolicy.isSendingPermitted()) {
-                    val unsupportedMsg = "Message sending is currently disabled by policy."
-                    task.state = com.boopathi.bg.service.agent.AgentTaskState.FAILED
-                    task.failureReason = unsupportedMsg
-                    memoryManager.logInteraction("Confirm", unsupportedMsg)
-                    return@launch
+                    reject("Message sending is currently disabled by policy.")
+                    return@withLock
                 }
 
-                // 6. Owner / Device Authentication Gate (BiometricPrompt / Credential challenge)
                 val authResult = ownerAuthGate.authenticate(
                     title = "Confirm Message Dispatch",
-                    subtitle = "Send message to ${draft.recipient}?"
+                    subtitle = "Authenticate to send this message to ${draft.recipient}."
                 )
-
                 if (!authResult.isSuccess) {
-                    val authFailMsg = when (authResult.status) {
-                        com.boopathi.bg.service.security.AuthResultStatus.CANCELLED -> "Authentication was cancelled. I didn't send the message."
-                        else -> "Authentication failed. I didn't send the message."
-                    }
-                    task.state = com.boopathi.bg.service.agent.AgentTaskState.FAILED
-                    task.failureReason = authFailMsg
-                    memoryManager.logInteraction("Confirm", authFailMsg)
-                    return@launch
+                    val authFailMsg = if (authResult.status == com.boopathi.bg.service.security.AuthResultStatus.CANCELLED)
+                        "Authentication was cancelled. I didn't send the message."
+                    else "Device authentication failed or is unavailable. I didn't send the message."
+                    reject(authFailMsg)
+                    return@withLock
                 }
 
-                // 7. Controlled Final Send Action via AppAgent
-                task.sendExecuted = true
-                val sendAction = com.boopathi.bg.service.agent.AppAction.SendMessage(
-                    expectedRecipient = draft.recipient,
-                    expectedMessage = draft.messageText,
-                    targetApp = draft.sourceApp
-                )
+                // Revalidate the exact active task after returning from the system authentication UI.
+                val active = multiStepAgent.currentTask.value
+                if (active !== task || task.state != com.boopathi.bg.service.agent.AgentTaskState.WAITING_FOR_CONFIRMATION ||
+                    task.sendExecuted || !com.boopathi.bg.service.messaging.MessagingPolicy.isConfirmationFresh(task.confirmationCreatedAt) ||
+                    task.draft?.let { com.boopathi.bg.service.security.MessageDispatchAuthorization.fingerprint(task.taskId, it) } != expectedActionFingerprint ||
+                    task.confirmationRequest?.let { com.boopathi.bg.service.security.MessageDispatchAuthorization.confirmationFingerprint(task.taskId, draft, it) } != expectedConfirmationFingerprint ||
+                    task.confirmationFingerprint != expectedConfirmationFingerprint) {
+                    reject("The confirmation no longer matches the active message. Review it again.", blocked = true)
+                    return@withLock
+                }
 
-                val result = appAgent.executeAction(sendAction)
+                val action = com.boopathi.bg.service.agent.AppAction.SendMessage(draft.recipient, draft.messageText, draft.sourceApp)
+                val authorization = com.boopathi.bg.service.security.MessageDispatchAuthorization.issue(task.taskId, draft, System.currentTimeMillis())
+                task.sendExecuted = true // Claim before dispatch to prevent duplicate taps or callbacks.
+                val result = appAgent.executeAuthorizedSend(task.taskId, action, authorization)
                 if (result.isSuccess) {
                     task.state = com.boopathi.bg.service.agent.AgentTaskState.SUCCESS
-                    val successMsg = "Message sent successfully to ${draft.recipient}."
-                    memoryManager.logInteraction("Confirm", successMsg)
+                    multiStepAgent.publishCurrentTaskState(task)
+                    memoryManager.logInteraction("Confirm", "Message sent and verified.")
                 } else {
                     task.state = com.boopathi.bg.service.agent.AgentTaskState.FAILED
-                    task.failureReason = result.reason ?: "I couldn't verify that the message was sent."
+                    task.failureReason = if (result.reason?.contains("clicked", ignoreCase = true) == true || result.reason?.contains("could not be confirmed", ignoreCase = true) == true)
+                        "The send may have occurred, but BG couldn't verify it. Check WhatsApp before retrying."
+                    else result.reason ?: "The message was not sent."
+                    multiStepAgent.publishCurrentTaskState(task)
                     memoryManager.logInteraction("Confirm", task.failureReason!!)
                 }
             }

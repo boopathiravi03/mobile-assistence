@@ -92,7 +92,7 @@ class GeminiMultimodalProvider(
                     return@withContext Result.success(result)
                 }
             } catch (e: Exception) {
-                Log.w(TAG, "Model $model multimodal call failed: ${e.message}")
+                Log.w(TAG, "Model $model multimodal call failed (${e.javaClass.simpleName})")
                 lastException = e
             }
         }
@@ -199,7 +199,7 @@ class GeminiMultimodalProvider(
             }
             sb.toString().trim().takeIf { it.isNotEmpty() }
         } catch (e: Exception) {
-            Log.w(TAG, "Failed to parse Gemini response JSON: ${e.message}")
+            Log.w(TAG, "Failed to parse Gemini response JSON (${e.javaClass.simpleName})")
             null
         }
     }

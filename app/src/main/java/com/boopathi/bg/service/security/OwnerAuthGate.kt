@@ -31,13 +31,19 @@ interface OwnerAuthGate {
 }
 
 /**
- * Default in-memory / mockable implementation of OwnerAuthGate for tests and head-less environments.
+ * Mockable test implementation. It fails closed unless a test explicitly requests success.
  */
 open class SimpleOwnerAuthGate(
-    var mockStatus: AuthResultStatus = AuthResultStatus.SUCCESS
+    var mockStatus: AuthResultStatus = AuthResultStatus.UNAVAILABLE
 ) : OwnerAuthGate {
     override suspend fun authenticate(title: String, subtitle: String): AuthResult {
         return AuthResult(status = mockStatus)
     }
+}
+
+/** Used until an Activity installs the system credential-confirmation flow. */
+class UnavailableOwnerAuthGate : OwnerAuthGate {
+    override suspend fun authenticate(title: String, subtitle: String): AuthResult =
+        AuthResult(AuthResultStatus.UNAVAILABLE, "Device authentication is unavailable.")
 }
 

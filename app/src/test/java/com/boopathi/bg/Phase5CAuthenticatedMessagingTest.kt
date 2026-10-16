@@ -33,6 +33,7 @@ import com.boopathi.bg.service.security.AuthResult
 import com.boopathi.bg.service.security.AuthResultStatus
 import com.boopathi.bg.service.security.OwnerAuthGate
 import com.boopathi.bg.service.security.SimpleOwnerAuthGate
+import com.boopathi.bg.service.security.MessageDispatchAuthorization
 import com.boopathi.bg.service.tool.RiskLevel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
@@ -47,6 +48,13 @@ import org.junit.runner.RunWith
 
 @RunWith(AndroidJUnit4::class)
 class Phase5CAuthenticatedMessagingTest {
+
+    private suspend fun executeAuthorized(action: AppAction.SendMessage, agent: AppAgent = appAgent) =
+        agent.executeAuthorizedSend(
+            "test-task",
+            action,
+            MessageDispatchAuthorization.issue("test-task", MessageDraft(action.expectedRecipient, action.expectedMessage, action.targetApp), System.currentTimeMillis())
+        )
 
     private lateinit var context: Context
     private lateinit var db: BGDatabase
@@ -202,7 +210,7 @@ class Phase5CAuthenticatedMessagingTest {
         )
 
         val sendAction = AppAction.SendMessage(expectedRecipient = "Karthi", expectedMessage = "Hi")
-        val result = appAgent.executeAction(sendAction)
+        val result = executeAuthorized(sendAction)
 
         assertFalse(result.isSuccess)
         assertTrue(result.reason?.contains("could not be verified") == true)
@@ -219,7 +227,7 @@ class Phase5CAuthenticatedMessagingTest {
         )
 
         val sendAction = AppAction.SendMessage(expectedRecipient = "Karthi", expectedMessage = "Hi")
-        val result = appAgent.executeAction(sendAction)
+        val result = executeAuthorized(sendAction)
 
         assertFalse(result.isSuccess)
         assertTrue(result.reason?.contains("does not match") == true)
@@ -235,7 +243,7 @@ class Phase5CAuthenticatedMessagingTest {
         )
 
         val sendAction = AppAction.SendMessage(expectedRecipient = "Karthi", expectedMessage = "Hi")
-        val result = appAgent.executeAction(sendAction)
+        val result = executeAuthorized(sendAction)
 
         assertFalse(result.isSuccess)
         assertEquals(AppActionResultStatus.NOT_FOUND, result.status)
@@ -253,7 +261,7 @@ class Phase5CAuthenticatedMessagingTest {
         )
 
         val sendAction = AppAction.SendMessage(expectedRecipient = "Karthi", expectedMessage = "Hi")
-        val result = appAgent.executeAction(sendAction)
+        val result = executeAuthorized(sendAction)
 
         assertFalse(result.isSuccess)
         assertTrue(result.reason?.contains("could not be verified") == true)
@@ -279,7 +287,7 @@ class Phase5CAuthenticatedMessagingTest {
 
         val testAgent = AppAgent(bridge = bridge, messagingAdapter = testAdapter)
         val sendAction = AppAction.SendMessage(expectedRecipient = "Karthi", expectedMessage = "Hi")
-        val result = testAgent.executeAction(sendAction)
+        val result = executeAuthorized(sendAction, testAgent)
 
         assertTrue(result.isSuccess)
         assertEquals(AppActionResultStatus.SUCCESS, result.status)
@@ -317,7 +325,7 @@ class Phase5CAuthenticatedMessagingTest {
 
         val testAgent = AppAgent(bridge = bridge, messagingAdapter = unverifiedAdapter)
         val sendAction = AppAction.SendMessage(expectedRecipient = "Karthi", expectedMessage = "Hi")
-        val result = testAgent.executeAction(sendAction)
+        val result = executeAuthorized(sendAction, testAgent)
 
         assertFalse(result.isSuccess)
         assertTrue(result.reason?.contains("unverified") == true)

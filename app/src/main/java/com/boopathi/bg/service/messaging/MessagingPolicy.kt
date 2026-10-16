@@ -34,6 +34,8 @@ object MessagingPolicy {
 
     /** Bounded post-send verification window in milliseconds (5 seconds) */
     const val SEND_VERIFY_TIMEOUT_MS = 5_000L
+    const val MAX_MESSAGE_LENGTH = 4_000
+    private const val MAX_RECIPIENT_LENGTH = 80
 
     /**
      * Backward-compatibility flag for Phase 5B tests:
@@ -47,6 +49,10 @@ object MessagingPolicy {
     val SUPPORTED_APPS = setOf("WhatsApp")
 
     fun isSendingPermitted(): Boolean = !SENDING_UNSUPPORTED && SEND_ALLOWED
+
+    fun isValidRecipient(recipient: String): Boolean = recipient == recipient.trim() &&
+        recipient.isNotBlank() && recipient.length <= MAX_RECIPIENT_LENGTH &&
+        recipient.none { it.isISOControl() }
 
     /**
      * Inspects message content for sensitive authentication, credentials, or financial data.
@@ -97,7 +103,8 @@ object MessagingPolicy {
     /**
      * Validates whether confirmation is fresh and not expired.
      */
-    fun isConfirmationFresh(confirmationTimestamp: Long): Boolean {
-        return (System.currentTimeMillis() - confirmationTimestamp) <= CONFIRMATION_TIMEOUT_MS
+    fun isConfirmationFresh(confirmationTimestamp: Long, now: Long = System.currentTimeMillis()): Boolean {
+        return confirmationTimestamp > 0L && now >= confirmationTimestamp &&
+            now - confirmationTimestamp <= CONFIRMATION_TIMEOUT_MS
     }
 }

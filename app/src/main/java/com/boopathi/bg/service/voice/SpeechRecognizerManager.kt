@@ -14,6 +14,9 @@ import android.util.Log
 import androidx.core.content.ContextCompat
 import java.util.Locale
 
+internal fun isCurrentSpeechCallback(callbackSessionId: Long, activeSessionId: Long?): Boolean =
+    callbackSessionId == activeSessionId
+
 /** Owns one Android recognizer and tags every callback with the session that started it. */
 class SpeechRecognizerManager(
     private val context: Context,
@@ -42,9 +45,12 @@ class SpeechRecognizerManager(
                 return@post
             }
             try {
-                val recognizer = speechRecognizer ?: SpeechRecognizer.createSpeechRecognizer(context).also { created ->
+                // Each listener is permanently bound to this session. Reusing a recognizer can
+                // deliver a late callback from an older request after a newer session starts.
+                speechRecognizer?.let { runCatching { it.destroy() } }
+                val recognizer = SpeechRecognizer.createSpeechRecognizer(context).also { created ->
                     speechRecognizer = created
-                    created.setRecognitionListener(createListener())
+                    created.setRecognitionListener(createListener(sessionId))
                 }
                 activeSessionId = sessionId
                 val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
@@ -87,29 +93,32 @@ class SpeechRecognizerManager(
         }
     }
 
-    private fun createListener() = object : RecognitionListener {
-        override fun onReadyForSpeech(params: Bundle?) = activeSessionId?.let(onReadyListener) ?: Unit
-        override fun onBeginningOfSpeech() = activeSessionId?.let(onBeginningListener) ?: Unit
-        override fun onRmsChanged(rmsdB: Float) = activeSessionId?.let { onRmsChangedListener(it, rmsdB) } ?: Unit
+    private fun createListener(sessionId: Long) = object : RecognitionListener {
+        private fun isCurrentSession() = isCurrentSpeechCallback(sessionId, activeSessionId)
+
+        override fun onReadyForSpeech(params: Bundle?) { if (isCurrentSession()) onReadyListener(sessionId) }
+        override fun onBeginningOfSpeech() { if (isCurrentSession()) onBeginningListener(sessionId) }
+        override fun onRmsChanged(rmsdB: Float) { if (isCurrentSession()) onRmsChangedListener(sessionId, rmsdB) }
         override fun onBufferReceived(buffer: ByteArray?) = Unit
         override fun onEndOfSpeech() {
+            if (!isCurrentSession()) return
             isListening = false
-            activeSessionId?.let(onEndListener)
+            onEndListener(sessionId)
         }
         override fun onPartialResults(partialResults: Bundle?) {
-            val id = activeSessionId ?: return
+            if (!isCurrentSession()) return
             partialResults?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull()?.trim()
-                ?.takeIf(String::isNotEmpty)?.let { onPartialListener(id, it) }
+                ?.takeIf(String::isNotEmpty)?.let { onPartialListener(sessionId, it) }
         }
         override fun onResults(results: Bundle?) {
-            val id = activeSessionId ?: return
+            if (!isCurrentSession()) return
             activeSessionId = null
             isListening = false
             val text = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull()?.trim().orEmpty()
-            if (text.isEmpty()) onErrorListener(id, VoiceFailure.NoSpeech) else onResultListener(id, text)
+            if (text.isEmpty()) onErrorListener(sessionId, VoiceFailure.NoSpeech) else onResultListener(sessionId, text)
         }
         override fun onError(error: Int) {
-            val id = activeSessionId ?: return
+            if (!isCurrentSession()) return
             activeSessionId = null
             isListening = false
             val failure = when (error) {
@@ -121,7 +130,7 @@ class SpeechRecognizerManager(
                 SpeechRecognizer.ERROR_AUDIO -> VoiceFailure.Audio
                 else -> VoiceFailure.RecognitionFailed
             }
-            onErrorListener(id, failure)
+            onErrorListener(sessionId, failure)
         }
         override fun onEvent(eventType: Int, params: Bundle?) = Unit
     }

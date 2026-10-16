@@ -29,6 +29,7 @@ import com.boopathi.bg.service.notification.NotificationInfo
 import com.boopathi.bg.service.notification.NotificationPrivacyPolicy
 import com.boopathi.bg.service.security.AuthResultStatus
 import com.boopathi.bg.service.security.SimpleOwnerAuthGate
+import com.boopathi.bg.service.security.MessageDispatchAuthorization
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
 import org.junit.After
@@ -43,6 +44,13 @@ import org.junit.runner.RunWith
 
 @RunWith(AndroidJUnit4::class)
 class Phase5DHardeningTest {
+
+    private suspend fun executeAuthorized(action: AppAction.SendMessage, agent: AppAgent = appAgent) =
+        agent.executeAuthorizedSend(
+            "test-task",
+            action,
+            MessageDispatchAuthorization.issue("test-task", MessageDraft(action.expectedRecipient, action.expectedMessage, action.targetApp), System.currentTimeMillis())
+        )
 
     private lateinit var context: Context
     private lateinit var db: BGDatabase
@@ -186,7 +194,7 @@ class Phase5DHardeningTest {
         assertFalse(recipientVerified)
 
         val sendAction = AppAction.SendMessage(expectedRecipient = "Karthi", expectedMessage = "hi")
-        val result = appAgent.executeAction(sendAction)
+        val result = executeAuthorized(sendAction)
         assertFalse(result.isSuccess)
         assertTrue(result.reason?.contains("could not be verified") == true)
     }
@@ -227,7 +235,7 @@ class Phase5DHardeningTest {
 
         val testAgent = AppAgent(bridge = bridge, messagingAdapter = unverifiedAdapter)
         val sendAction = AppAction.SendMessage(expectedRecipient = "Karthi", expectedMessage = "hi")
-        val result = testAgent.executeAction(sendAction)
+        val result = executeAuthorized(sendAction, testAgent)
 
         assertFalse(result.isSuccess)
         assertTrue(result.reason?.contains("No automatic retry") == true)

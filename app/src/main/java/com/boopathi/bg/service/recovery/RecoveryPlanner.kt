@@ -324,7 +324,7 @@ Rules:
                 isExecutable = true
             )
         } catch (e: Exception) {
-            Log.w(TAG, "AI recovery generation failed: ${e.message}")
+            Log.w(TAG, "AI recovery generation failed (${e.javaClass.simpleName})")
             null
         }
     }

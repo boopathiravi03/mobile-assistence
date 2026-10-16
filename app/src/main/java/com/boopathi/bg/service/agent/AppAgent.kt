@@ -39,7 +39,7 @@ class AppAgent(
 
     suspend fun executePlan(plan: AppPlan): AppActionResult = withContext(Dispatchers.Default) {
         _state.value = AppAgentState.PLANNING
-        Log.i(TAG, "Starting plan '${plan.goal}' with ${plan.size} actions.")
+        Log.i(TAG, "Starting plan with ${plan.size} actions.")
 
         var finalResult = AppActionResult(
             actionType = AppActionType.INSPECT_UI,
@@ -53,7 +53,7 @@ class AppAgent(
             _lastResult.value = finalResult
 
             if (!finalResult.isSuccess) {
-                Log.w(TAG, "Plan '${plan.goal}' stopped at ${action.type}: ${finalResult.status} (${finalResult.reason})")
+                Log.w(TAG, "Plan stopped at ${action.type}: ${finalResult.status}")
                 break
             }
         }
@@ -63,14 +63,43 @@ class AppAgent(
         finalResult
     }
 
-    suspend fun executeAction(action: AppAction): AppActionResult = withContext(Dispatchers.Default) {
+    suspend fun executeAction(action: AppAction): AppActionResult =
+        executeActionInternal(action, authorizedSend = false)
+
+    internal suspend fun executeAuthorizedSend(
+        taskId: String,
+        action: AppAction.SendMessage,
+        authorization: com.boopathi.bg.service.security.MessageDispatchAuthorization
+    ): AppActionResult {
+        if (!authorization.consume(taskId, action, System.currentTimeMillis())) {
+            return AppActionResult(
+                actionType = action.type,
+                status = AppActionResultStatus.BLOCKED,
+                targetDescription = "Message dispatch",
+                reason = "Message authorization is invalid, expired, mismatched, or already used."
+            )
+        }
+        return executeActionInternal(action, authorizedSend = true)
+    }
+
+    private suspend fun executeActionInternal(action: AppAction, authorizedSend: Boolean): AppActionResult = withContext(Dispatchers.Default) {
         val startTime = System.currentTimeMillis()
+
+        if (action is AppAction.SendMessage && !authorizedSend) {
+            _state.value = AppAgentState.REQUIRES_CONFIRMATION
+            return@withContext AppActionResult(
+                actionType = action.type,
+                status = AppActionResultStatus.REQUIRES_CONFIRMATION,
+                targetDescription = "Message dispatch",
+                reason = "A fresh, action-bound owner authorization is required before sending."
+            )
+        }
 
         // 1. Risk Evaluation Policy Check
         val riskDecision = AgentExecutionPolicy.evaluateActionRisk(action)
         if (!riskDecision.isPermitted) {
-            val allowConfirmedSend = (action is AppAction.SendMessage && riskDecision.status == AppActionResultStatus.REQUIRES_CONFIRMATION)
-            if (!allowConfirmedSend) {
+            val allowAuthorizedSend = (action is AppAction.SendMessage && authorizedSend && riskDecision.status == AppActionResultStatus.REQUIRES_CONFIRMATION)
+            if (!allowAuthorizedSend) {
                 _state.value = when (riskDecision.status) {
                     AppActionResultStatus.REQUIRES_CONFIRMATION -> AppAgentState.REQUIRES_CONFIRMATION
                     AppActionResultStatus.BLOCKED -> AppAgentState.BLOCKED
@@ -310,6 +339,21 @@ class AppAgent(
             is AppAction.SendMessage -> {
                 _state.value = AppAgentState.EXECUTING
                 val adapter = messagingAdapter ?: com.boopathi.bg.service.messaging.WhatsAppMessagingAdapter()
+                if (!com.boopathi.bg.service.messaging.MessagingPolicy.isSendingPermitted() ||
+                    !com.boopathi.bg.service.messaging.MessagingPolicy.isContentSafeToSend(action.expectedMessage) ||
+                    action.targetApp !in com.boopathi.bg.service.messaging.MessagingPolicy.SUPPORTED_APPS ||
+                    action.targetApp != adapter.supportedAppName ||
+                    !com.boopathi.bg.service.messaging.MessagingPolicy.isValidRecipient(action.expectedRecipient) ||
+                    action.expectedMessage.isBlank() || action.expectedMessage.length > com.boopathi.bg.service.messaging.MessagingPolicy.MAX_MESSAGE_LENGTH) {
+                    _state.value = AppAgentState.BLOCKED
+                    return@withContext AppActionResult(
+                        actionType = action.type,
+                        status = AppActionResultStatus.BLOCKED,
+                        targetDescription = "Message dispatch",
+                        reason = "The target app, recipient, or message is invalid or unsupported.",
+                        executionDurationMs = System.currentTimeMillis() - startTime
+                    )
+                }
 
                 // 1. Pre-send verification: Recipient
                 val recipientVerified = adapter.verifyRecipient(bridge, action.expectedRecipient)

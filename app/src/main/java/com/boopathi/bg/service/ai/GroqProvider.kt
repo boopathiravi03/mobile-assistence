@@ -116,7 +116,7 @@ class GroqProvider(
                     )
                 }
             } catch (e: Exception) {
-                Log.w("GroqProvider", "Failed to call Groq API: ${e.message}")
+                Log.w("GroqProvider", "Failed to call Groq API (${e.javaClass.simpleName})")
                 CommandResult(
                     textResponse = "I'm having trouble connecting to my AI service right now.",
                     providerName = name,

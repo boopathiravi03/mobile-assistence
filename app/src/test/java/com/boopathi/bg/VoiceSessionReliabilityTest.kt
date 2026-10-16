@@ -3,6 +3,7 @@ package com.boopathi.bg
 import com.boopathi.bg.data.model.AssistantState
 import com.boopathi.bg.service.voice.VoiceSessionGate
 import com.boopathi.bg.service.voice.VoiceStateTransitions
+import com.boopathi.bg.service.voice.isCurrentSpeechCallback
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
@@ -39,6 +40,13 @@ class VoiceSessionReliabilityTest {
         val newSession = gate.begin()
         gate.invalidate(oldSession)
         assertTrue(gate.isCurrent(newSession))
+    }
+
+    @Test fun callbackRemainsBoundToItsOriginalRecognizerSession() {
+        val oldSession = 4L
+        val newSession = 5L
+        assertFalse(isCurrentSpeechCallback(oldSession, newSession))
+        assertTrue(isCurrentSpeechCallback(newSession, newSession))
     }
 
     @Test fun listeningMayMoveToRecognitionAndProcessing() {

@@ -5,6 +5,7 @@ import com.boopathi.bg.service.agent.AgentTask
 import com.boopathi.bg.service.agent.AppAction
 import com.boopathi.bg.service.agent.ConfirmationRequest
 import com.boopathi.bg.service.tool.RiskLevel
+import com.boopathi.bg.service.security.MessageDispatchAuthorization
 
 /**
  * Creates bounded AgentTask instances for message preparation.
@@ -72,6 +73,7 @@ object MessagePreparationTask {
             actionDescription = "Send message to ${draft.recipient}",
             riskLevel = RiskLevel.MEDIUM
         )
+        task.confirmationFingerprint = MessageDispatchAuthorization.confirmationFingerprint(task.taskId, draft, task.confirmationRequest!!)
 
         return task
     }

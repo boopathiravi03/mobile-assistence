@@ -40,7 +40,7 @@ class BGNotificationListenerService : NotificationListenerService() {
         val repo = NotificationAccessManager.getInstance(applicationContext).repository
         repo.addNotification(info)
 
-        Log.d(TAG, "Observed notification from [${info.appLabel}]: title='${info.title}', redacted=${info.isRedacted}")
+        Log.d(TAG, "Observed notification from [${info.appLabel}], redacted=${info.isRedacted}")
     }
 
     override fun onNotificationRemoved(sbn: StatusBarNotification?) {

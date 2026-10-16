@@ -1,5 +1,6 @@
 package com.boopathi.bg.service.agent
 
+import com.boopathi.bg.service.security.MessageDispatchAuthorization
 import java.util.UUID
 
 /**
@@ -19,6 +20,9 @@ data class AgentTask(
     var draft: com.boopathi.bg.service.messaging.MessageDraft? = null,
     var confirmationCreatedAt: Long = System.currentTimeMillis(),
     var sendExecuted: Boolean = false,
+    var confirmationFingerprint: String? = draft?.let { messageDraft ->
+        confirmationRequest?.let { MessageDispatchAuthorization.confirmationFingerprint(taskId, messageDraft, it) }
+    },
     var recoveryAttemptCount: Int = 0,
     var lastRecoveryReason: String? = null
 ) {

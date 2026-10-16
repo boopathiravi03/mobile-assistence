@@ -142,7 +142,7 @@ class CommandProcessor(
 
         val plannedWorkflow = wfPlanner?.createDeterministicWorkflow(trimmed)
         if (plannedWorkflow != null && wfExecutor != null) {
-            Log.d(TAG, "Router: Matched CrossAppWorkflow -> ${plannedWorkflow.goalDescription} (${plannedWorkflow.totalSteps} steps)")
+            Log.d(TAG, "Router: Matched CrossAppWorkflow (${plannedWorkflow.totalSteps} steps)")
             val wfResult = wfExecutor.executeWorkflow(plannedWorkflow, owner)
             return wfResult
         }
@@ -177,7 +177,7 @@ class CommandProcessor(
             localProvider.processCommand(trimmed, owner)
         } else if (agentTask != null && multiStepAgent != null) {
             // Priority 2: Bounded Multi-Step Controlled App Agent
-            Log.d(TAG, "Router: Matched MultiStepAgent task -> ${agentTask.normalizedGoal} (${agentTask.totalSteps} steps)")
+            Log.d(TAG, "Router: Matched MultiStepAgent task (${agentTask.totalSteps} steps)")
             val executedTask = multiStepAgent.executeTask(agentTask)
             val responseText = formatAgentTaskResponse(executedTask, owner)
             CommandResult(
@@ -207,10 +207,10 @@ class CommandProcessor(
             }
         } else if (toolIntent != null) {
             // Priority 3: Direct Android Tool command
-            Log.d(TAG, "Command: \"$trimmed\" | Intent: ${toolIntent.toolName} | Params: ${toolIntent.parameters}")
+            Log.d(TAG, "Direct device-tool request: ${toolIntent.toolName}")
             if (toolRegistry != null) {
                 val toolResult = toolRegistry.execute(toolIntent.toolName, toolIntent.parameters)
-                Log.i(TAG, "Command: \"$trimmed\" | Intent: ${toolIntent.toolName} | Tool: ${toolIntent.toolName} | Result: ${toolResult.status}")
+                Log.i(TAG, "Device-tool result: ${toolIntent.toolName} (${toolResult.status})")
                 CommandResult(
                     textResponse = toolResult.message,
                     providerName = "ToolRegistry",
@@ -243,7 +243,7 @@ class CommandProcessor(
 
             val proposedPlan = dynamicPlanner.createDeterministicLocalPlan(trimmed)
             if (proposedPlan != null) {
-                Log.d(TAG, "Router: Executing dynamic plan via AgentPlanExecutor: ${proposedPlan.goal.normalizedGoal}")
+                Log.d(TAG, "Router: Executing a local dynamic plan (${proposedPlan.steps.size} steps)")
                 dynamicExecutor.executePlan(proposedPlan, owner)
             } else if (geminiProvider.isAvailable) {
                 Log.d(TAG, "Router: Routing natural language query to Gemini AI (context turns: ${history.size / 2}, relevant memories: ${relevantMemories.size})")
