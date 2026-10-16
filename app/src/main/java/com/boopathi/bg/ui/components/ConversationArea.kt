@@ -23,6 +23,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.boopathi.bg.data.model.ChatMessage
@@ -35,7 +36,6 @@ import com.boopathi.bg.ui.theme.TextPrimary
 import com.boopathi.bg.ui.theme.TextSecondary
 import java.text.SimpleDateFormat
 import java.util.Date
-import java.util.Locale
 
 @Composable
 fun ConversationArea(
@@ -92,7 +92,7 @@ private fun ChatMessageItem(message: ChatMessage) {
     val alignment = if (isUser) Alignment.End else Alignment.Start
     val bubbleColor = if (isUser) ElectricBlue.copy(alpha = 0.25f) else BgCardDark
     val textColor = if (isUser) TextPrimary else NeonCyan
-    val timeFormat = SimpleDateFormat("h:mm a", Locale.getDefault())
+    val timeFormat = SimpleDateFormat("h:mm a", LocalConfiguration.current.locales[0])
 
     Column(
         modifier = Modifier.fillMaxWidth(),

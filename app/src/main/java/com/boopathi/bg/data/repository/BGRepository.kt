@@ -5,6 +5,7 @@ import com.boopathi.bg.data.local.entity.ConversationMessageEntity
 import com.boopathi.bg.data.local.entity.MemoryEntity
 import com.boopathi.bg.data.local.entity.OwnerProfileEntity
 import com.boopathi.bg.data.local.entity.TaskEntity
+import com.boopathi.bg.data.local.entity.WorkflowHistoryEntity
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
@@ -40,6 +41,8 @@ interface BGRepository {
     suspend fun getAllTasks(): List<TaskEntity>
     suspend fun getActiveTasks(): List<TaskEntity>
     suspend fun completeTask(keyword: String): Boolean
+    suspend fun saveWorkflowHistory(history: WorkflowHistoryEntity): Long
+    suspend fun getWorkflowHistoryById(workflowId: String): WorkflowHistoryEntity?
 }
 
 class RoomBGRepository(
@@ -170,6 +173,14 @@ class RoomBGRepository(
         } else {
             false
         }
+    }
+
+    override suspend fun saveWorkflowHistory(history: WorkflowHistoryEntity): Long = withContext(ioDispatcher) {
+        db.workflowHistoryDao().insert(history)
+    }
+
+    override suspend fun getWorkflowHistoryById(workflowId: String): WorkflowHistoryEntity? = withContext(ioDispatcher) {
+        db.workflowHistoryDao().getByWorkflowId(workflowId)
     }
 }
 

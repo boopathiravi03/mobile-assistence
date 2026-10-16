@@ -21,7 +21,6 @@ import com.boopathi.bg.service.agent.UiElementInfo
 import com.boopathi.bg.service.command.CommandProcessor
 import com.boopathi.bg.service.memory.RoomMemoryManager
 import com.boopathi.bg.service.tool.RiskLevel
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -54,7 +53,7 @@ class Phase5AMultiStepAgentTest {
             .allowMainThreadQueries()
             .build()
         repository = RoomBGRepository(db, Dispatchers.Unconfined)
-        memoryManager = RoomMemoryManager(repository, CoroutineScope(Dispatchers.Unconfined))
+        memoryManager = RoomMemoryManager(repository)
 
         bridge = FakeAccessibilityBridge()
         appAgent = AppAgent(bridge = bridge)

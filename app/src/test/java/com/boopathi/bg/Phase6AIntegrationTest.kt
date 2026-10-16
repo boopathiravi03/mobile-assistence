@@ -26,7 +26,6 @@ import com.boopathi.bg.service.planner.AgentPlanStatus
 import com.boopathi.bg.service.planner.AgentPlanner
 import com.boopathi.bg.service.security.DefaultOwnerVerificationService
 import com.boopathi.bg.service.tool.ToolRegistry
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
 import org.junit.After
@@ -82,7 +81,7 @@ class Phase6AIntegrationTest {
             .allowMainThreadQueries()
             .build()
         repository = RoomBGRepository(db, Dispatchers.Unconfined)
-        memoryManager = RoomMemoryManager(repository, CoroutineScope(Dispatchers.Unconfined))
+        memoryManager = RoomMemoryManager(repository)
 
         bridge = FakeAccessibilityBridge(currentPkg = "com.google.android.youtube")
         appAgent = AppAgent(bridge = bridge)

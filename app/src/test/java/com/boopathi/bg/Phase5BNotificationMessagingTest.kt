@@ -24,7 +24,6 @@ import com.boopathi.bg.service.notification.NotificationInfo
 import com.boopathi.bg.service.notification.NotificationParser
 import com.boopathi.bg.service.notification.NotificationPrivacyPolicy
 import com.boopathi.bg.service.notification.NotificationType
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
 import org.junit.After
@@ -58,7 +57,7 @@ class Phase5BNotificationMessagingTest {
             .allowMainThreadQueries()
             .build()
         repository = RoomBGRepository(db, Dispatchers.Unconfined)
-        memoryManager = RoomMemoryManager(repository, CoroutineScope(Dispatchers.Unconfined))
+        memoryManager = RoomMemoryManager(repository)
 
         bridge = FakeAccessibilityBridge()
         appAgent = AppAgent(bridge = bridge)

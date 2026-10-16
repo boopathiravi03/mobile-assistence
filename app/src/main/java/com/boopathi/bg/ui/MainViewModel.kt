@@ -80,8 +80,7 @@ class MainViewModel @JvmOverloads constructor(
 
     // Dependency injection / Clean architecture
     val memoryManager: MemoryManager = customMemoryManager ?: RoomMemoryManager(
-        repository = RoomBGRepository(BGDatabase.getInstance(application)),
-        scope = viewModelScope
+        repository = RoomBGRepository(BGDatabase.getInstance(application))
     )
     private val commandProcessor: CommandProcessor = CommandProcessor(
         memoryManager = memoryManager,
@@ -146,6 +145,9 @@ class MainViewModel @JvmOverloads constructor(
     val providerStatus: String = "● " + commandProcessor.getActiveProviderBadge()
 
     init {
+        viewModelScope.launch {
+            (memoryManager as? RoomMemoryManager)?.loadPersistedMessages()
+        }
         refreshProfileAndStats()
     }
 

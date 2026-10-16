@@ -21,7 +21,6 @@ import com.boopathi.bg.service.agent.UiElementInfo
 import com.boopathi.bg.service.command.CommandProcessor
 import com.boopathi.bg.service.memory.RoomMemoryManager
 import com.boopathi.bg.service.tool.ToolRegistry
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
 import org.junit.After
@@ -108,7 +107,7 @@ class Phase4AgentTest {
             .allowMainThreadQueries()
             .build()
         repository = RoomBGRepository(db, Dispatchers.Unconfined)
-        memoryManager = RoomMemoryManager(repository, CoroutineScope(Dispatchers.Unconfined))
+        memoryManager = RoomMemoryManager(repository)
 
         bridge = FakeAccessibilityBridge()
         appAgent = AppAgent(bridge = bridge)

@@ -6,29 +6,18 @@ import com.boopathi.bg.data.model.ChatMessage
 import com.boopathi.bg.data.model.OwnerProfile
 import com.boopathi.bg.data.model.Sender
 import com.boopathi.bg.data.repository.BGRepository
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.Dispatchers
 
 class RoomMemoryManager(
-    private val repository: BGRepository,
-    private val scope: CoroutineScope = CoroutineScope(Dispatchers.IO)
+    private val repository: BGRepository
 ) : MemoryManager {
 
     private val _messages = MutableStateFlow<List<ChatMessage>>(emptyList())
     private val messages = _messages.asStateFlow()
-
-    init {
-        // Hydrate conversation flow from Room on startup
-        scope.launch {
-            loadPersistedMessages()
-        }
-    }
 
     suspend fun loadPersistedMessages() = withContext(Dispatchers.IO) {
         val stored = repository.getRecentMessages(limit = 50)

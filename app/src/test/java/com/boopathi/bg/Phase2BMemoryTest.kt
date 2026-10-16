@@ -10,7 +10,6 @@ import com.boopathi.bg.data.model.OwnerProfile
 import com.boopathi.bg.data.repository.RoomBGRepository
 import com.boopathi.bg.service.command.CommandProcessor
 import com.boopathi.bg.service.memory.RoomMemoryManager
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
 import org.junit.After
@@ -38,7 +37,7 @@ class Phase2BMemoryTest {
             .allowMainThreadQueries()
             .build()
         repository = RoomBGRepository(db, Dispatchers.Unconfined)
-        memoryManager = RoomMemoryManager(repository, CoroutineScope(Dispatchers.Unconfined))
+        memoryManager = RoomMemoryManager(repository)
         processor = CommandProcessor(memoryManager)
     }
 
@@ -140,7 +139,7 @@ class Phase2BMemoryTest {
 
         // STEP 2 & 3: Simulate Close BG and Reopen BG
         // Create new manager instance pointing to the same database
-        val reopenedManager = RoomMemoryManager(repository, CoroutineScope(Dispatchers.Unconfined))
+        val reopenedManager = RoomMemoryManager(repository)
         val reopenedProcessor = CommandProcessor(reopenedManager)
 
         // STEP 4: Ask what is favorite programming language
@@ -180,7 +179,7 @@ class Phase2BMemoryTest {
         assertEquals("Study DBMS", tasks[0].title)
 
         // STEP 10: Restart application and verify persistence
-        val finalManager = RoomMemoryManager(repository, CoroutineScope(Dispatchers.Unconfined))
+        val finalManager = RoomMemoryManager(repository)
         assertEquals(2, finalManager.getMemories().filter { it.type != MemoryEntity.TYPE_NOTE }.size)
         assertEquals(1, finalManager.getNotes().size)
         assertEquals(1, finalManager.getTasks(completed = false).size)

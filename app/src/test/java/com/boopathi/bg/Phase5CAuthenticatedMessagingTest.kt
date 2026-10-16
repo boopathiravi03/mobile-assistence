@@ -34,7 +34,6 @@ import com.boopathi.bg.service.security.AuthResultStatus
 import com.boopathi.bg.service.security.OwnerAuthGate
 import com.boopathi.bg.service.security.SimpleOwnerAuthGate
 import com.boopathi.bg.service.tool.RiskLevel
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
 import org.junit.After
@@ -69,7 +68,7 @@ class Phase5CAuthenticatedMessagingTest {
             .allowMainThreadQueries()
             .build()
         repository = RoomBGRepository(db, Dispatchers.Unconfined)
-        memoryManager = RoomMemoryManager(repository, CoroutineScope(Dispatchers.Unconfined))
+        memoryManager = RoomMemoryManager(repository)
 
         bridge = FakeAccessibilityBridge(currentPkg = "com.whatsapp")
         appAgent = AppAgent(bridge = bridge)

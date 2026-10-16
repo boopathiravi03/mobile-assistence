@@ -28,7 +28,9 @@ class CommandProcessor(
     val agentPlanner: com.boopathi.bg.service.planner.AgentPlanner? = null,
     val agentPlanExecutor: com.boopathi.bg.service.planner.AgentPlanExecutor? = null,
     val crossAppWorkflowPlanner: com.boopathi.bg.service.workflow.CrossAppWorkflowPlanner? = null,
-    val crossAppWorkflowExecutor: com.boopathi.bg.service.workflow.CrossAppWorkflowExecutor? = null
+    val crossAppWorkflowExecutor: com.boopathi.bg.service.workflow.CrossAppWorkflowExecutor? = null,
+    private val multimodalProvider: com.boopathi.bg.service.multimodal.MultimodalPerceptionProvider? = null,
+    private val multimodalSessionManager: com.boopathi.bg.service.multimodal.MultimodalSessionManager? = null
 ) {
 
     companion object {
@@ -71,6 +73,7 @@ class CommandProcessor(
         // Priority 0: Explicit Cancellation Command ("Stop", "Cancel", "BG stop", "Cancel task", "Stop pannu", "BG niruthu")
         val lowerClean = trimmed.lowercase().removeSuffix(".").removeSuffix("!").trim()
         if (lowerClean in listOf("stop", "cancel", "bg stop", "cancel task", "stop task", "stop pannu", "cancel pannu", "bg niruthu", "niruthu")) {
+            multimodalSessionManager?.clearSession()
             val agentCancelled = multiStepAgent?.cancelCurrentTask("Cancelled by user request") ?: false
             val workflowCancelled = crossAppWorkflowExecutor?.cancelWorkflow("Cancelled by user request") ?: false
             val cancelMsg = if (agentCancelled || workflowCancelled) "Task stopped." else "No active task running."
@@ -79,6 +82,48 @@ class CommandProcessor(
                 providerName = "MultiStepAgent",
                 isSuccess = true
             )
+        }
+
+        // While an image session is active, follow-up questions remain scoped to
+        // that image and its ephemeral conversation history.
+        val activeImageSession = multimodalSessionManager?.getActiveSession()
+        if (activeImageSession != null && multimodalProvider != null) {
+            val analysis = multimodalProvider.analyzeImage(
+                image = activeImageSession.image,
+                prompt = trimmed,
+                conversationHistory = activeImageSession.conversationTurns.toList()
+            )
+            val result = analysis.fold(
+                onSuccess = { perception ->
+                    val response = buildList {
+                        add(perception.summary)
+                        perception.extractedText?.takeIf { it.isNotBlank() }?.let { add("Text: $it") }
+                        perception.visualElements.takeIf { it.isNotEmpty() }?.let { add("I can see: ${it.joinToString()}") }
+                        perception.suggestedActions.takeIf { it.isNotEmpty() }?.let { add("Suggestions: ${it.joinToString()}") }
+                    }.joinToString("\n")
+                    multimodalSessionManager.recordTurn(trimmed, response)
+                    CommandResult(textResponse = response, providerName = perception.providerName, isSuccess = true)
+                },
+                onFailure = { error ->
+                    CommandResult(
+                        textResponse = "I couldn't analyze that image: ${error.message ?: "analysis failed"}",
+                        providerName = multimodalProvider.name,
+                        isSuccess = false
+                    )
+                }
+            )
+            memoryManager.logInteraction(trimmed, result.textResponse)
+            return result
+        }
+
+        if (isImageRelatedQuery(trimmed)) {
+            val result = CommandResult(
+                textResponse = "Please select or attach an image first, then ask me about it.",
+                providerName = "Multimodal",
+                isSuccess = false
+            )
+            memoryManager.logInteraction(trimmed, result.textResponse)
+            return result
         }
 
         // Priority 0.5: Cross-App Workflow Orchestration (Phase 6C)
@@ -222,6 +267,14 @@ class CommandProcessor(
         memoryManager.logInteraction(trimmed, result.textResponse)
 
         return result
+    }
+
+    private fun isImageRelatedQuery(text: String): Boolean {
+        val lower = text.lowercase()
+        return listOf(
+            "image", "picture", "photo", "screenshot", "this error", "this warning",
+            "indha screen", "indha screenshot", "indha image", "indha error"
+        ).any(lower::contains)
     }
 
     private suspend fun handleMemoryOrTaskCommand(text: String, owner: OwnerProfile): CommandResult? {

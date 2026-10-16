@@ -19,7 +19,6 @@ import com.boopathi.bg.service.tool.ToolRegistry
 import com.boopathi.bg.service.tool.ToolResult
 import com.boopathi.bg.service.tool.ToolStatus
 import com.boopathi.bg.service.tool.VolumeTool
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
 import org.junit.After
@@ -49,7 +48,7 @@ class Phase3ToolTest {
             .allowMainThreadQueries()
             .build()
         repository = RoomBGRepository(db, Dispatchers.Unconfined)
-        memoryManager = RoomMemoryManager(repository, CoroutineScope(Dispatchers.Unconfined))
+        memoryManager = RoomMemoryManager(repository)
 
         toolRegistry = ToolRegistry().apply {
             register(OpenAppTool(context))
