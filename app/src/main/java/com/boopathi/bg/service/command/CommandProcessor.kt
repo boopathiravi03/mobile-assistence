@@ -30,7 +30,8 @@ class CommandProcessor(
     val crossAppWorkflowPlanner: com.boopathi.bg.service.workflow.CrossAppWorkflowPlanner? = null,
     val crossAppWorkflowExecutor: com.boopathi.bg.service.workflow.CrossAppWorkflowExecutor? = null,
     private val multimodalProvider: com.boopathi.bg.service.multimodal.MultimodalPerceptionProvider? = null,
-    private val multimodalSessionManager: com.boopathi.bg.service.multimodal.MultimodalSessionManager? = null
+    private val multimodalSessionManager: com.boopathi.bg.service.multimodal.MultimodalSessionManager? = null,
+    private val scheduledTaskManager: com.boopathi.bg.service.reminder.ReminderManager? = null
 ) {
 
     companion object {
@@ -82,6 +83,11 @@ class CommandProcessor(
                 providerName = "MultiStepAgent",
                 isSuccess = true
             )
+        }
+
+        scheduledTaskManager?.handleCommand(trimmed)?.let { response ->
+            memoryManager.logInteraction(trimmed, response)
+            return CommandResult(textResponse = response, providerName = "Reminders", isSuccess = true)
         }
 
         // While an image session is active, follow-up questions remain scoped to

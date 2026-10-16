@@ -31,7 +31,11 @@ import android.provider.Settings
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.launch
+import com.boopathi.bg.data.local.entity.TaskEntity
+import com.boopathi.bg.service.reminder.ReminderManager
+import com.boopathi.bg.service.reminder.ReminderNotifications
 
 class MainViewModel @JvmOverloads constructor(
     application: Application,
@@ -79,9 +83,19 @@ class MainViewModel @JvmOverloads constructor(
     val workflowProgressMessage = crossAppWorkflowExecutor.progressMessage
 
     // Dependency injection / Clean architecture
-    val memoryManager: MemoryManager = customMemoryManager ?: RoomMemoryManager(
-        repository = RoomBGRepository(BGDatabase.getInstance(application))
-    )
+    private val bgRepository = RoomBGRepository(BGDatabase.getInstance(application))
+    val memoryManager: MemoryManager = customMemoryManager ?: RoomMemoryManager(repository = bgRepository)
+    private val reminderManager = ReminderManager(application, bgRepository)
+    val reminderTasks: Flow<List<TaskEntity>> = reminderManager.reminderTasks
+
+    private val _reminderMessage = MutableStateFlow<String?>(null)
+    val reminderMessage: StateFlow<String?> = _reminderMessage.asStateFlow()
+    private val _reminderBusy = MutableStateFlow(false)
+    val reminderBusy: StateFlow<Boolean> = _reminderBusy.asStateFlow()
+
+    private val _notificationPermission = MutableStateFlow(ReminderNotifications.hasPermission(application))
+    val notificationPermission: StateFlow<Boolean> = _notificationPermission.asStateFlow()
+
     private val commandProcessor: CommandProcessor = CommandProcessor(
         memoryManager = memoryManager,
         toolRegistry = toolRegistry,
@@ -89,7 +103,8 @@ class MainViewModel @JvmOverloads constructor(
         multiStepAgent = multiStepAgent,
         notificationAccessManager = notificationAccessManager,
         crossAppWorkflowPlanner = crossAppWorkflowPlanner,
-        crossAppWorkflowExecutor = crossAppWorkflowExecutor
+        crossAppWorkflowExecutor = crossAppWorkflowExecutor,
+        scheduledTaskManager = reminderManager
     )
 
     private var voiceManager: VoiceManager? = null
@@ -148,10 +163,42 @@ class MainViewModel @JvmOverloads constructor(
     val providerStatus: String = "● " + commandProcessor.getActiveProviderBadge()
 
     init {
+        viewModelScope.launch { reminderManager.reconcile() }
         viewModelScope.launch {
             (memoryManager as? RoomMemoryManager)?.loadPersistedMessages()
         }
         refreshProfileAndStats()
+    }
+
+    fun createReminder(text: String) {
+        viewModelScope.launch {
+            _reminderBusy.value = true
+            try {
+                val result = runCatching { reminderManager.createFromText(text) }
+                _reminderMessage.value = result.getOrNull()?.message ?: "I couldn't save that reminder. Please try again."
+            } finally { _reminderBusy.value = false }
+        }
+    }
+
+    fun reminderAction(action: suspend (ReminderManager) -> String) {
+        viewModelScope.launch {
+            _reminderBusy.value = true
+            try {
+                _reminderMessage.value = runCatching { action(reminderManager) }
+                    .getOrElse { "The reminder could not be updated. Please try again." }
+            } finally { _reminderBusy.value = false }
+        }
+    }
+
+    fun clearReminderMessage() { _reminderMessage.value = null }
+    fun onNotificationPermissionResult() { _notificationPermission.value = ReminderNotifications.hasPermission(getApplication()) }
+
+    fun openReminderNotificationSettings() {
+        val intent = Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).apply {
+            putExtra(Settings.EXTRA_APP_PACKAGE, getApplication<Application>().packageName)
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        getApplication<Application>().startActivity(intent)
     }
 
     fun refreshProfileAndStats() {

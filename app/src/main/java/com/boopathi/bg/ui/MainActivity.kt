@@ -3,8 +3,10 @@ package com.boopathi.bg.ui
 import android.Manifest
 import android.content.pm.PackageManager
 import android.content.Intent
+import android.os.Build
 import android.os.Bundle
 import android.net.Uri
+import android.provider.Settings
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
@@ -21,6 +23,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
 
         viewModel.initVoiceManager(this)
+        viewModel.onNotificationPermissionResult()
 
         val hasInitialMicPermission = ContextCompat.checkSelfPermission(
             this,
@@ -36,6 +39,10 @@ class MainActivity : ComponentActivity() {
                         viewModel.onMicPermissionResult(isGranted)
                     }
                 )
+                val notificationPermissionLauncher = rememberLauncherForActivityResult(
+                    contract = ActivityResultContracts.RequestPermission(),
+                    onResult = { viewModel.onNotificationPermissionResult() }
+                )
 
                 MainScreen(
                     viewModel = viewModel,
@@ -50,10 +57,32 @@ class MainActivity : ComponentActivity() {
                             prefs.edit().putBoolean("requested", true).apply()
                             permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
                         }
+                    },
+                    onRequestNotificationPermission = {
+                        if (Build.VERSION.SDK_INT >= 33) {
+                            val permission = Manifest.permission.POST_NOTIFICATIONS
+                            val prefs = getSharedPreferences("reminder_permission", MODE_PRIVATE)
+                            val requestedBefore = prefs.getBoolean("requested", false)
+                            if (requestedBefore && !shouldShowRequestPermissionRationale(permission)) {
+                                startActivity(Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).apply {
+                                    putExtra(Settings.EXTRA_APP_PACKAGE, packageName)
+                                })
+                            } else {
+                                prefs.edit().putBoolean("requested", true).apply()
+                                notificationPermissionLauncher.launch(permission)
+                            }
+                        } else {
+                            viewModel.onNotificationPermissionResult()
+                        }
                     }
                 )
             }
         }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        viewModel.onNotificationPermissionResult()
     }
 }
 

@@ -5,6 +5,7 @@ import com.boopathi.bg.data.local.entity.ConversationMessageEntity
 import com.boopathi.bg.data.local.entity.MemoryEntity
 import com.boopathi.bg.data.local.entity.OwnerProfileEntity
 import com.boopathi.bg.data.local.entity.TaskEntity
+import com.boopathi.bg.data.local.entity.TaskStatus
 import com.boopathi.bg.data.local.entity.WorkflowHistoryEntity
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
@@ -41,6 +42,19 @@ interface BGRepository {
     suspend fun getAllTasks(): List<TaskEntity>
     suspend fun getActiveTasks(): List<TaskEntity>
     suspend fun completeTask(keyword: String): Boolean
+    suspend fun insertScheduledTask(task: TaskEntity): TaskEntity
+    suspend fun updateScheduledTask(task: TaskEntity): Int
+    fun observeReminderTasks(): Flow<List<TaskEntity>>
+    suspend fun getReminderTasks(): List<TaskEntity>
+    suspend fun getScheduledTasks(): List<TaskEntity>
+    suspend fun getTask(id: Long): TaskEntity?
+    suspend fun claimOccurrence(id: Long, occurrenceAt: Long, nextStatus: String, completed: Boolean, nextOccurrenceAt: Long?, notificationId: Int, failureReason: String?): Int
+    suspend fun setSnooze(id: Long, snoozedUntil: Long): Int
+    suspend fun claimSnooze(id: Long, snoozedUntil: Long, status: String, failureReason: String?): Int
+    suspend fun setTaskFailure(id: Long, reason: String?): Int
+    suspend fun updateTaskStatus(id: Long, status: String, completed: Boolean, failureReason: String?): Int
+    suspend fun deleteTask(id: Long): Int
+    suspend fun clearCompletedTasks(): Int
     suspend fun saveWorkflowHistory(history: WorkflowHistoryEntity): Long
     suspend fun getWorkflowHistoryById(workflowId: String): WorkflowHistoryEntity?
 }
@@ -168,12 +182,37 @@ class RoomBGRepository(
     override suspend fun completeTask(keyword: String): Boolean = withContext(ioDispatcher) {
         val task = db.taskDao().findTaskByKeyword(keyword)
         if (task != null) {
-            db.taskDao().updateTask(task.copy(completed = true))
+            db.taskDao().updateTask(task.copy(completed = true, status = TaskStatus.COMPLETED, updatedAt = System.currentTimeMillis()))
             true
         } else {
             false
         }
     }
+
+    override suspend fun insertScheduledTask(task: TaskEntity): TaskEntity = withContext(ioDispatcher) {
+        val id = db.taskDao().insertTask(task)
+        task.copy(id = id)
+    }
+
+    override suspend fun updateScheduledTask(task: TaskEntity): Int = withContext(ioDispatcher) { db.taskDao().updateTask(task) }
+
+    override fun observeReminderTasks(): Flow<List<TaskEntity>> = db.taskDao().observeScheduledTasks()
+    override suspend fun getReminderTasks(): List<TaskEntity> = withContext(ioDispatcher) { db.taskDao().getReminderTasks() }
+    override suspend fun getScheduledTasks(): List<TaskEntity> = withContext(ioDispatcher) { db.taskDao().getScheduledTasks() }
+    override suspend fun getTask(id: Long): TaskEntity? = withContext(ioDispatcher) { db.taskDao().getById(id) }
+    override suspend fun claimOccurrence(id: Long, occurrenceAt: Long, nextStatus: String, completed: Boolean, nextOccurrenceAt: Long?, notificationId: Int, failureReason: String?): Int = withContext(ioDispatcher) {
+        db.taskDao().claimOccurrenceWithResult(id, occurrenceAt, nextStatus, completed, nextOccurrenceAt, notificationId, failureReason)
+    }
+    override suspend fun setSnooze(id: Long, snoozedUntil: Long): Int = withContext(ioDispatcher) { db.taskDao().setSnooze(id, snoozedUntil) }
+    override suspend fun claimSnooze(id: Long, snoozedUntil: Long, status: String, failureReason: String?): Int = withContext(ioDispatcher) {
+        db.taskDao().claimSnooze(id, snoozedUntil, status, failureReason)
+    }
+    override suspend fun setTaskFailure(id: Long, reason: String?): Int = withContext(ioDispatcher) { db.taskDao().setFailureReason(id, reason) }
+    override suspend fun updateTaskStatus(id: Long, status: String, completed: Boolean, failureReason: String?): Int = withContext(ioDispatcher) {
+        db.taskDao().updateLifecycle(id, status, completed, failureReason)
+    }
+    override suspend fun deleteTask(id: Long): Int = withContext(ioDispatcher) { db.taskDao().deleteById(id) }
+    override suspend fun clearCompletedTasks(): Int = withContext(ioDispatcher) { db.taskDao().clearCompleted() }
 
     override suspend fun saveWorkflowHistory(history: WorkflowHistoryEntity): Long = withContext(ioDispatcher) {
         db.workflowHistoryDao().insert(history)

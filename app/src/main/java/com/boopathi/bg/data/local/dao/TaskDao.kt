@@ -37,5 +37,44 @@ interface TaskDao {
 
     @Query("SELECT COUNT(*) FROM tasks WHERE completed = 0")
     suspend fun getPendingTaskCount(): Int
+
+    @Query("SELECT * FROM tasks WHERE id = :id LIMIT 1")
+    suspend fun getById(id: Long): TaskEntity?
+
+    @Query("SELECT * FROM tasks WHERE taskType IN ('reminder', 'recurring_reminder', 'workflow_request') ORDER BY COALESCE(nextOccurrenceAt, dueTime) ASC")
+    fun observeScheduledTasks(): Flow<List<TaskEntity>>
+
+    @Query("SELECT * FROM tasks WHERE taskType IN ('reminder', 'recurring_reminder', 'workflow_request') AND status IN ('pending', 'scheduled', 'delivered', 'failed') ORDER BY COALESCE(nextOccurrenceAt, dueTime) ASC")
+    suspend fun getReminderTasks(): List<TaskEntity>
+
+    @Query("SELECT * FROM tasks WHERE taskType IN ('reminder', 'recurring_reminder', 'workflow_request') AND status = 'scheduled'")
+    suspend fun getScheduledTasks(): List<TaskEntity>
+
+    @Query("UPDATE tasks SET lastOccurrenceAt = :occurrenceAt, snoozedUntil = NULL, status = :nextStatus, completed = :completed, dueTime = COALESCE(:nextOccurrenceAt, dueTime), nextOccurrenceAt = :nextOccurrenceAt, notificationId = :notificationId, failureReason = :failureReason, updatedAt = :updatedAt WHERE id = :id AND status = 'scheduled' AND nextOccurrenceAt = :occurrenceAt AND (lastOccurrenceAt IS NULL OR lastOccurrenceAt != :occurrenceAt)")
+    suspend fun claimOccurrenceWithResult(
+        id: Long,
+        occurrenceAt: Long,
+        nextStatus: String,
+        completed: Boolean,
+        nextOccurrenceAt: Long?,
+        notificationId: Int,
+        failureReason: String?,
+        updatedAt: Long = System.currentTimeMillis()
+    ): Int
+
+    @Query("UPDATE tasks SET snoozedUntil = :snoozedUntil, status = 'scheduled', failureReason = NULL, updatedAt = :updatedAt WHERE id = :id AND status IN ('scheduled', 'delivered') AND completed = 0")
+    suspend fun setSnooze(id: Long, snoozedUntil: Long, updatedAt: Long = System.currentTimeMillis()): Int
+
+    @Query("UPDATE tasks SET snoozedUntil = NULL, status = :status, failureReason = :failureReason, updatedAt = :updatedAt WHERE id = :id AND status = 'scheduled' AND snoozedUntil = :snoozedUntil")
+    suspend fun claimSnooze(id: Long, snoozedUntil: Long, status: String, failureReason: String?, updatedAt: Long = System.currentTimeMillis()): Int
+
+    @Query("UPDATE tasks SET failureReason = :reason, updatedAt = :updatedAt WHERE id = :id AND status = 'scheduled'")
+    suspend fun setFailureReason(id: Long, reason: String?, updatedAt: Long = System.currentTimeMillis()): Int
+
+    @Query("UPDATE tasks SET status = :status, completed = :completed, failureReason = :failureReason, updatedAt = :updatedAt WHERE id = :id AND status IN ('pending', 'scheduled', 'delivered', 'failed')")
+    suspend fun updateLifecycle(id: Long, status: String, completed: Boolean, failureReason: String?, updatedAt: Long = System.currentTimeMillis()): Int
+
+    @Query("DELETE FROM tasks WHERE completed = 1 OR status IN ('completed', 'cancelled')")
+    suspend fun clearCompleted(): Int
 }
 

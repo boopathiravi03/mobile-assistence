@@ -13,9 +13,13 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
@@ -26,6 +30,8 @@ import com.boopathi.bg.ui.components.AssistantStatusBar
 import com.boopathi.bg.ui.components.ConversationArea
 import com.boopathi.bg.ui.components.QuickCommandBar
 import com.boopathi.bg.ui.components.VoiceOrb
+import com.boopathi.bg.ui.components.ReminderCenter
+import com.boopathi.bg.data.local.entity.TaskStatus
 import com.boopathi.bg.ui.theme.BgDarkBackground
 import com.boopathi.bg.ui.theme.DangerRed
 import com.boopathi.bg.ui.theme.ElectricBlue
@@ -36,8 +42,10 @@ import com.boopathi.bg.ui.theme.TextSecondary
 @Composable
 fun MainScreen(
     viewModel: MainViewModel,
-    onRequestPermission: () -> Unit
+    onRequestPermission: () -> Unit,
+    onRequestNotificationPermission: () -> Unit
 ) {
+    var showReminderCenter by remember { mutableStateOf(false) }
     val assistantState by viewModel.assistantState.collectAsState()
     val voiceTranscript by viewModel.voiceTranscript.collectAsState()
     val audioRmsDb by viewModel.audioRmsDb.collectAsState()
@@ -61,6 +69,10 @@ fun MainScreen(
     val currentWorkflow by viewModel.currentWorkflow.collectAsState()
     val workflowStatus by viewModel.workflowStatus.collectAsState()
     val workflowProgressMessage by viewModel.workflowProgressMessage.collectAsState()
+    val reminderTasks by viewModel.reminderTasks.collectAsState(initial = emptyList())
+    val reminderMessage by viewModel.reminderMessage.collectAsState()
+    val reminderBusy by viewModel.reminderBusy.collectAsState()
+    val notificationPermission by viewModel.notificationPermission.collectAsState()
 
     if (showProfileDialog) {
         com.boopathi.bg.ui.components.OwnerProfileDialog(
@@ -138,6 +150,11 @@ fun MainScreen(
                 }
             )
 
+            TextButton(onClick = { showReminderCenter = true }, modifier = Modifier.align(Alignment.CenterHorizontally)) {
+                val activeReminders = reminderTasks.count { it.status !in setOf(TaskStatus.CANCELLED, TaskStatus.COMPLETED) }
+                Text("Reminders ($activeReminders)")
+            }
+
             Spacer(modifier = Modifier.height(12.dp))
 
             // Voice Interaction Control Section
@@ -198,6 +215,26 @@ fun MainScreen(
                 }
             }
         }
+    }
+
+    if (showReminderCenter) {
+        ReminderCenter(
+            tasks = reminderTasks,
+            notificationsAllowed = notificationPermission,
+            message = reminderMessage,
+            busy = reminderBusy,
+            onDismiss = { showReminderCenter = false; viewModel.clearReminderMessage() },
+            onCreate = viewModel::createReminder,
+            onReschedule = { id, phrase -> viewModel.reminderAction { it.reschedule(id, phrase).message } },
+            onComplete = { id -> viewModel.reminderAction { it.complete(id).message } },
+            onSnooze = { id -> viewModel.reminderAction { it.snooze(id).message } },
+            onCancel = { id -> viewModel.reminderAction { it.cancel(id).message } },
+            onDelete = { id -> viewModel.reminderAction { it.delete(id).message } },
+            onRetry = { id -> viewModel.reminderAction { it.retry(id).message } },
+            onClearCompleted = { viewModel.reminderAction { it.clearCompleted(); "Completed reminders cleared." } },
+            onRequestNotificationPermission = onRequestNotificationPermission,
+            onOpenNotificationSettings = viewModel::openReminderNotificationSettings
+        )
     }
 }
 
