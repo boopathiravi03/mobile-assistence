@@ -7,6 +7,7 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.annotation.SuppressLint
 import android.net.Uri
 import android.os.Build
 import androidx.core.app.NotificationCompat
@@ -34,6 +35,7 @@ object ReminderNotifications {
         }
     }
 
+    @SuppressLint("MissingPermission") // hasPermission checks app-level notification access and POST_NOTIFICATIONS before notify.
     fun show(context: Context, task: TaskEntity): Boolean {
         if (!hasPermission(context)) return false
         ensureChannel(context)
