@@ -29,7 +29,7 @@ interface MessagingAppAdapter {
         expectedDraft: String,
         previousMatchCount: Int,
         timeoutMs: Long = 5000L
-    ): Boolean = verifyMessageSent(bridge, expectedDraft, timeoutMs)
+    ): Boolean = false
 
     fun normalizeDraft(value: String): String = value.replace("\r\n", "\n")
         .trim()
@@ -121,11 +121,15 @@ open class WhatsAppMessagingAdapter : MessagingAppAdapter {
         return candidates.maxByOrNull { it.depth } ?: candidates.firstOrNull()
     }
 
+    @Deprecated("Use the overload that supplies previousMatchCount captured before tapping Send.")
     open override suspend fun verifyMessageSent(
         bridge: AccessibilityBridge,
         expectedDraft: String,
         timeoutMs: Long
-    ): Boolean = verifyMessageSent(bridge, expectedDraft, Int.MAX_VALUE, timeoutMs)
+    ): Boolean {
+        Log.w(TAG, "Cannot verify message without a pre-send baseline.")
+        return false
+    }
 
     override suspend fun verifyMessageSent(
         bridge: AccessibilityBridge,

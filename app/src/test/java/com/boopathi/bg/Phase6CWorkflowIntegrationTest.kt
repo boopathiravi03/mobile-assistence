@@ -255,7 +255,7 @@ class Phase6CWorkflowIntegrationTest {
             override suspend fun verifyRecipient(bridge: com.boopathi.bg.service.agent.AccessibilityBridge, expectedRecipient: String): Boolean = true
             override suspend fun verifyDraft(bridge: com.boopathi.bg.service.agent.AccessibilityBridge, expectedDraft: String): Boolean = true
             override suspend fun findSendButton(bridge: com.boopathi.bg.service.agent.AccessibilityBridge): UiElementInfo? = null
-            override suspend fun verifyMessageSent(bridge: com.boopathi.bg.service.agent.AccessibilityBridge, expectedDraft: String, timeoutMs: Long): Boolean = true
+            override suspend fun verifyMessageSent(bridge: com.boopathi.bg.service.agent.AccessibilityBridge, expectedDraft: String, timeoutMs: Long): Boolean = false
         }
 
         val appAgent = AppAgent(bridge = bridge, messagingAdapter = fakeAdapter)

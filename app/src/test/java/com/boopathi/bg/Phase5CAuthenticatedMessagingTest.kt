@@ -267,38 +267,102 @@ class Phase5CAuthenticatedMessagingTest {
         assertTrue(result.reason?.contains("could not be verified") == true)
     }
 
-    // 15. Send: Executes and Verifies
+    // 15. Send: Executes and verifies through the real adapter against a changing UI bridge
     @Test
     fun testSendActionExecutesAndVerifies() = runBlocking {
-        // Mock UI with Karthi conversation, "Hi" in editable field, and clickable Send button
-        bridge.currentPkg = "com.whatsapp"
+        bridge = object : FakeAccessibilityBridge(currentPkg = "com.whatsapp") {
+            override suspend fun click(element: UiElementInfo): Boolean {
+                val clicked = super.click(element)
+                if (clicked) {
+                    mockElements = mutableListOf(
+                        UiElementInfo(text = "Karthi", isClickable = false),
+                        UiElementInfo(text = "Hi", isClickable = false),
+                        UiElementInfo(text = "", isEditable = true, isEnabled = true),
+                        UiElementInfo(text = "Send", isClickable = true, isEnabled = true)
+                    )
+                }
+                return clicked
+            }
+        }
         bridge.mockElements = mutableListOf(
             UiElementInfo(text = "Karthi", isClickable = false),
             UiElementInfo(text = "Hi", isEditable = true, isEnabled = true),
             UiElementInfo(text = "Send", isClickable = true, isEnabled = true)
         )
 
-        // Custom adapter simulating post-send state: input field cleared, outgoing message added
-        val testAdapter = object : WhatsAppMessagingAdapter() {
-            override suspend fun verifyMessageSent(bridge: com.boopathi.bg.service.agent.AccessibilityBridge, expectedDraft: String, timeoutMs: Long): Boolean {
-                return true
-            }
-
-            override suspend fun verifyMessageSent(
-                bridge: com.boopathi.bg.service.agent.AccessibilityBridge,
-                expectedDraft: String,
-                previousMatchCount: Int,
-                timeoutMs: Long
-            ): Boolean = true
-        }
-
-        val testAgent = AppAgent(bridge = bridge, messagingAdapter = testAdapter)
+        val testAgent = AppAgent(bridge = bridge, messagingAdapter = WhatsAppMessagingAdapter())
         val sendAction = AppAction.SendMessage(expectedRecipient = "Karthi", expectedMessage = "Hi")
         val result = executeAuthorized(sendAction, testAgent)
 
         assertTrue(result.isSuccess)
         assertEquals(AppActionResultStatus.SUCCESS, result.status)
         assertTrue(bridge.executedActions.contains("click:Send"))
+    }
+
+    @Test
+    fun realWhatsAppAdapterVerifiesNewExactMessageAndClearedInput() = runBlocking {
+        bridge.mockElements = mutableListOf(
+            UiElementInfo(text = "Hi", isEditable = true, isEnabled = true)
+        )
+        val baseline = WhatsAppMessagingAdapter().exactMessageMatchCount(bridge, "Hi")
+        bridge.mockElements = mutableListOf(
+            UiElementInfo(text = "Hi", isEditable = false),
+            UiElementInfo(text = "", isEditable = true, isEnabled = true)
+        )
+
+        assertTrue(WhatsAppMessagingAdapter().verifyMessageSent(bridge, "Hi", baseline, timeoutMs = 1_000L))
+    }
+
+    @Test
+    fun realWhatsAppAdapterRejectsOldMatchingMessageWithoutCountIncrease() = runBlocking {
+        bridge.mockElements = mutableListOf(
+            UiElementInfo(text = "Hi", isEditable = false),
+            UiElementInfo(text = "", isEditable = true, isEnabled = true)
+        )
+        val adapter = WhatsAppMessagingAdapter()
+        val baseline = adapter.exactMessageMatchCount(bridge, "Hi")
+
+        assertFalse(adapter.verifyMessageSent(bridge, "Hi", baseline, timeoutMs = 400L))
+    }
+
+    @Test
+    fun realWhatsAppAdapterRejectsMessageThatNeverAppears() = runBlocking {
+        bridge.mockElements = mutableListOf(
+            UiElementInfo(text = "", isEditable = true, isEnabled = true)
+        )
+
+        assertFalse(WhatsAppMessagingAdapter().verifyMessageSent(bridge, "Hi", 0, timeoutMs = 400L))
+    }
+
+    @Test
+    fun realWhatsAppAdapterRejectsBlankExpectedMessageImmediately() = runBlocking {
+        assertFalse(WhatsAppMessagingAdapter().verifyMessageSent(bridge, "  ", 0, timeoutMs = 5_000L))
+    }
+
+    @Test
+    fun legacyWhatsAppVerificationFailsClosedWithoutBaseline() = runBlocking {
+        bridge.mockElements = mutableListOf(
+            UiElementInfo(text = "Hi", isEditable = false),
+            UiElementInfo(text = "", isEditable = true, isEnabled = true)
+        )
+
+        @Suppress("DEPRECATION")
+        val verified = WhatsAppMessagingAdapter().verifyMessageSent(bridge, "Hi", timeoutMs = 400L)
+        assertFalse(verified)
+    }
+
+    @Test
+    fun adapterWithoutBaselineAwareVerificationFailsClosed() = runBlocking {
+        val legacyOnlyAdapter = object : MessagingAppAdapter {
+            override val supportedAppName = "WhatsApp"
+            override val supportedPackage = "com.whatsapp"
+            override suspend fun verifyRecipient(bridge: com.boopathi.bg.service.agent.AccessibilityBridge, expectedRecipient: String) = true
+            override suspend fun verifyDraft(bridge: com.boopathi.bg.service.agent.AccessibilityBridge, expectedDraft: String) = true
+            override suspend fun findSendButton(bridge: com.boopathi.bg.service.agent.AccessibilityBridge): UiElementInfo? = null
+            override suspend fun verifyMessageSent(bridge: com.boopathi.bg.service.agent.AccessibilityBridge, expectedDraft: String, timeoutMs: Long) = true
+        }
+
+        assertFalse(legacyOnlyAdapter.verifyMessageSent(bridge, "Hi", previousMatchCount = 0, timeoutMs = 10L))
     }
 
     // 16. Send: Duplicate Send Prevention
@@ -328,6 +392,13 @@ class Phase5CAuthenticatedMessagingTest {
             override suspend fun verifyMessageSent(bridge: com.boopathi.bg.service.agent.AccessibilityBridge, expectedDraft: String, timeoutMs: Long): Boolean {
                 return false
             }
+
+            override suspend fun verifyMessageSent(
+                bridge: com.boopathi.bg.service.agent.AccessibilityBridge,
+                expectedDraft: String,
+                previousMatchCount: Int,
+                timeoutMs: Long
+            ): Boolean = false
         }
 
         val testAgent = AppAgent(bridge = bridge, messagingAdapter = unverifiedAdapter)
