@@ -20,9 +20,10 @@ enum class NotificationAccessStatus {
  * Manages notification listener permission verification and service connectivity status.
  */
 open class NotificationAccessManager(
-    private val context: Context,
+    context: Context,
     val repository: NotificationRepository = InMemoryNotificationRepository()
 ) {
+    private val context: Context = context.applicationContext
 
     private val _status = MutableStateFlow(NotificationAccessStatus.NOT_ENABLED)
     val status: StateFlow<NotificationAccessStatus> = _status.asStateFlow()

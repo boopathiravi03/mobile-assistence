@@ -135,3 +135,13 @@ The code changes do not resolve the release blockers above: production signing c
 - Accessibility clicks and text entry now reject targets from a different foreground package. Target lookup requires one exact match across text, content description, or view ID and aborts when the match is missing or ambiguous.
 - Validation: `testDebugUnitTest` passed (232 tests, 0 failures/errors); `assembleDebug` passed; `:app:compileDebugAndroidTestKotlin` passed.
 - `adb devices -l` returned no connected devices, so the Phase 3 and Phase 11 instrumentation tests could not be run on a device. The debug APK was rebuilt; the unsigned release APK/AAB were not rebuilt or signed.
+
+## Automation & Messaging Release Hardening (2026-10-17)
+
+- `AppAgent.OpenApp`: Returns `AppActionResultStatus.UNAVAILABLE` when `ToolRegistry` is null, and properly checks `ToolResult.status` to prevent false positive successes on failed app launches.
+- `AppAgent.Tap` & `TypeText`: Rejects ambiguous controls by returning `REQUIRES_CLARIFICATION` whenever multiple actionable (clickable/editable and enabled) elements match the target query; fails safely if targets are disabled or not editable.
+- `AppVerifier.verifyWindowActive`: Strictly validates target app strings (rejecting blank targets immediately) and timeouts (rejecting non-positive values); enforces exact matching against a trusted package directory (`TRUSTED_APP_PACKAGES`) to prevent substring phishing/spoofing.
+- `WhatsAppMessagingAdapter.findSendButton`: Enforces foreground package check (`com.whatsapp`), restricts button discovery to verified labels and resource IDs, excludes audio/voice recording controls, and fails closed (`null`) when ambiguous matching controls exist.
+- `AppAgent.SendMessage`: Verifies foreground package identity immediately before dispatching the send click to prevent cross-app click-jacking or accidental sends if the user switches away.
+- Regression coverage: Added `Phase12ReleaseReadinessTest` with 14 comprehensive test cases covering OpenApp availability, launch failures, target ambiguity, blank targets, package spoofing, foreground shifts, ambiguous send buttons, message delivery baselines, and privacy filters.
+- Validation: `testDebugUnitTest` passed (246 tests, 0 failures/errors across 30 test classes); `assembleDebug` passed. No physical device/emulator was connected for instrumentation tests.

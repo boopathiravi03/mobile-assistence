@@ -25,6 +25,7 @@ import com.boopathi.bg.service.planner.AgentPlanRisk
 import com.boopathi.bg.service.planner.AgentPlanStatus
 import com.boopathi.bg.service.planner.AgentPlanner
 import com.boopathi.bg.service.security.DefaultOwnerVerificationService
+import com.boopathi.bg.service.tool.OpenAppTool
 import com.boopathi.bg.service.tool.ToolRegistry
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
@@ -84,7 +85,16 @@ class Phase6AIntegrationTest {
         memoryManager = RoomMemoryManager(repository)
 
         bridge = FakeAccessibilityBridge(currentPkg = "com.google.android.youtube")
-        appAgent = AppAgent(bridge = bridge)
+        val mockOpenAppTool = object : com.boopathi.bg.service.tool.Tool {
+            override val name: String = "OPEN_APP"
+            override val description: String = "Mock launch"
+            override val riskLevel: com.boopathi.bg.service.tool.RiskLevel = com.boopathi.bg.service.tool.RiskLevel.LOW
+            override suspend fun execute(parameters: Map<String, Any?>): com.boopathi.bg.service.tool.ToolResult {
+                return com.boopathi.bg.service.tool.ToolResult(com.boopathi.bg.service.tool.ToolStatus.SUCCESS, "Launched", "OPEN_APP")
+            }
+        }
+        val toolRegistry = ToolRegistry().apply { register(mockOpenAppTool) }
+        appAgent = AppAgent(bridge = bridge, toolRegistry = toolRegistry)
         multiStepAgent = MultiStepAgent(appAgent = appAgent)
 
         notifRepo = InMemoryNotificationRepository(maxCapacity = 50)

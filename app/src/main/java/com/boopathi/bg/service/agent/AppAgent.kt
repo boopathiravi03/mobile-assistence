@@ -144,21 +144,30 @@ class AppAgent(
         // 3. Action Execution and Verification
         when (action) {
             is AppAction.OpenApp -> {
-                val toolResult = toolRegistry?.execute("OPEN_APP", mapOf("appName" to action.appName))
-                val status = if (toolRegistry == null) {
-                    AppActionResultStatus.SUCCESS
-                } else {
-                    when (toolResult?.status) {
-                        ToolStatus.SUCCESS -> AppActionResultStatus.SUCCESS
-                        ToolStatus.UNAVAILABLE -> AppActionResultStatus.UNAVAILABLE
-                        else -> AppActionResultStatus.FAILED
-                    }
+                if (toolRegistry == null) {
+                    _state.value = AppAgentState.FAILED
+                    return@withContext AppActionResult(
+                        actionType = action.type,
+                        status = AppActionResultStatus.UNAVAILABLE,
+                        targetDescription = action.targetDescription,
+                        reason = "Tool registry is not available to launch '${action.appName}'.",
+                        executionDurationMs = System.currentTimeMillis() - startTime
+                    )
+                }
+                val toolResult = toolRegistry.execute("OPEN_APP", mapOf("appName" to action.appName))
+                val status = when (toolResult?.status) {
+                    ToolStatus.SUCCESS -> AppActionResultStatus.SUCCESS
+                    ToolStatus.UNAVAILABLE -> AppActionResultStatus.UNAVAILABLE
+                    else -> AppActionResultStatus.FAILED
+                }
+                if (status != AppActionResultStatus.SUCCESS) {
+                    _state.value = AppAgentState.FAILED
                 }
                 AppActionResult(
                     actionType = action.type,
                     status = status,
                     targetDescription = action.targetDescription,
-                    reason = toolResult?.message,
+                    reason = toolResult?.message ?: if (status != AppActionResultStatus.SUCCESS) "Failed to open '${action.appName}'." else null,
                     executionDurationMs = System.currentTimeMillis() - startTime,
                     verificationDetails = if (status == AppActionResultStatus.SUCCESS) "App launch request issued." else null
                 )
@@ -210,35 +219,31 @@ class AppAgent(
                     )
                 }
 
-                // Ambiguity Check: If multiple interactive candidates exist with distinctly different labels and no exact match
-                val exactMatches = elements.filter {
-                    it.text.equals(action.targetQuery, ignoreCase = true) ||
-                    it.contentDescription.equals(action.targetQuery, ignoreCase = true)
-                }
-                val candidates = if (exactMatches.isNotEmpty()) exactMatches else elements
-                val distinctLabels = candidates.map { it.displayLabel }.distinct()
+                val actionableCandidates = elements.filter { it.isClickable && it.isEnabled }
 
-                if (exactMatches.isEmpty() && distinctLabels.size > 1) {
-                    val candidateSummary = distinctLabels.take(3).joinToString(", ")
+                if (actionableCandidates.size > 1) {
                     return@withContext AppActionResult(
                         actionType = action.type,
                         status = AppActionResultStatus.REQUIRES_CLARIFICATION,
                         targetDescription = action.targetDescription,
-                        reason = "Multiple matching options found ($candidateSummary). Please clarify which one you mean.",
+                        reason = "Multiple matching options found for '${action.targetQuery}'. Please clarify which one you mean.",
                         executionDurationMs = System.currentTimeMillis() - startTime
                     )
                 }
 
-                // Pick first actionable element or first matched element
-                val target = candidates.firstOrNull { it.isClickable && it.isEnabled }
-                    ?: candidates.first()
-
-                if (!target.isEnabled) {
+                val target = actionableCandidates.singleOrNull()
+                if (target == null) {
+                    val firstMatch = elements.first()
+                    val reason = if (!firstMatch.isEnabled) {
+                        "Element '${firstMatch.displayLabel}' is disabled and cannot be tapped."
+                    } else {
+                        "Element '${firstMatch.displayLabel}' is not clickable and cannot be tapped."
+                    }
                     return@withContext AppActionResult(
                         actionType = action.type,
                         status = AppActionResultStatus.FAILED,
                         targetDescription = action.targetDescription,
-                        reason = "Element '${target.displayLabel}' is disabled and cannot be tapped.",
+                        reason = reason,
                         executionDurationMs = System.currentTimeMillis() - startTime
                     )
                 }
@@ -270,15 +275,31 @@ class AppAgent(
                     )
                 }
 
-                val target = elements.firstOrNull { it.isEditable && it.isEnabled }
-                    ?: elements.first()
+                val editableCandidates = elements.filter { it.isEditable && it.isEnabled }
 
-                if (!target.isEditable) {
+                if (editableCandidates.size > 1) {
+                    return@withContext AppActionResult(
+                        actionType = action.type,
+                        status = AppActionResultStatus.REQUIRES_CLARIFICATION,
+                        targetDescription = action.targetDescription,
+                        reason = "Multiple editable input fields match '${action.targetQuery}'. Please specify which field to edit.",
+                        executionDurationMs = System.currentTimeMillis() - startTime
+                    )
+                }
+
+                val target = editableCandidates.singleOrNull()
+                if (target == null) {
+                    val firstMatch = elements.first()
+                    val reason = if (!firstMatch.isEnabled) {
+                        "Target '${firstMatch.displayLabel}' is disabled and cannot accept text."
+                    } else {
+                        "Target '${firstMatch.displayLabel}' is not an editable text field."
+                    }
                     return@withContext AppActionResult(
                         actionType = action.type,
                         status = AppActionResultStatus.FAILED,
                         targetDescription = action.targetDescription,
-                        reason = "Target '${target.displayLabel}' is not an editable text field.",
+                        reason = reason,
                         executionDurationMs = System.currentTimeMillis() - startTime
                     )
                 }
@@ -398,7 +419,18 @@ class AppAgent(
                 // satisfy post-send verification.
                 val previousMatchingMessages = adapter.exactMessageMatchCount(bridge, action.expectedMessage)
 
-                // 4. Controlled Send Action: Click send once
+                // 4. Controlled Send Action: Verify foreground package and click send once
+                if (bridge.getCurrentPackage() != adapter.supportedPackage) {
+                    _state.value = AppAgentState.FAILED
+                    return@withContext AppActionResult(
+                        actionType = action.type,
+                        status = AppActionResultStatus.FAILED,
+                        targetDescription = action.targetDescription,
+                        reason = "Foreground app changed to '${bridge.getCurrentPackage()}' before sending (expected '${adapter.supportedPackage}'). Send action aborted.",
+                        executionDurationMs = System.currentTimeMillis() - startTime
+                    )
+                }
+
                 val sendClicked = bridge.click(sendButton)
                 if (!sendClicked) {
                     _state.value = AppAgentState.FAILED

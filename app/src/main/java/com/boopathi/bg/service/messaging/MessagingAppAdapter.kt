@@ -91,34 +91,40 @@ open class WhatsAppMessagingAdapter : MessagingAppAdapter {
     }
 
     override suspend fun findSendButton(bridge: AccessibilityBridge): UiElementInfo? {
+        val currentPkg = bridge.getCurrentPackage()
+        if (currentPkg != supportedPackage) {
+            Log.w(TAG, "Cannot find send button: foreground package mismatch '$currentPkg' != '$supportedPackage'")
+            return null
+        }
+
         val elements = bridge.getVisibleElements()
 
-        // Filter for actionable candidates while strictly excluding voice note / audio controls
+        val recognizedSendLabels = setOf("send", "send message", "anuppu", "enviar")
+        val recognizedSendIds = setOf("send", "send_btn", "send_button", "entry_action", "conversation_send_button")
+
         val candidates = elements.filter { el ->
             val desc = el.contentDescription.lowercase().trim()
             val txt = el.text.lowercase().trim()
-            val id = el.viewId.lowercase().trim()
+            val rawId = el.viewId.substringAfterLast("/").substringAfterLast(":").lowercase().trim()
 
             // Disallow voice message / audio recorder controls
             val isVoice = desc.contains("voice") || desc.contains("record") || desc.contains("audio") ||
-                    id.contains("voice") || id.contains("record")
+                    desc.contains("mic") || rawId.contains("voice") || rawId.contains("record") || rawId.contains("audio")
             if (isVoice) return@filter false
 
-            el.isClickable && el.isEnabled && (
-                desc == "send" ||
-                desc == "send message" ||
-                desc == "anuppu" ||
-                desc == "enviar" ||
-                desc.contains("send") ||
-                txt == "send" ||
-                txt == "anuppu" ||
-                id.contains("send") ||
-                id.contains("entry_action")
-            )
+            val matchesLabel = recognizedSendLabels.contains(desc) || recognizedSendLabels.contains(txt)
+            val matchesId = recognizedSendIds.contains(rawId)
+
+            el.isClickable && el.isEnabled && (matchesLabel || matchesId)
         }
 
-        // Prefer leaf nodes (higher depth in hierarchy) to hit the exact clickable ImageButton
-        return candidates.maxByOrNull { it.depth } ?: candidates.firstOrNull()
+        // If multiple plausible Send buttons remain, return no target instead of guessing.
+        if (candidates.size > 1) {
+            Log.w(TAG, "Ambiguous send buttons found (${candidates.size} matches). Failing closed without guessing.")
+            return null
+        }
+
+        return candidates.singleOrNull()
     }
 
     @Deprecated("Use the overload that supplies previousMatchCount captured before tapping Send.")

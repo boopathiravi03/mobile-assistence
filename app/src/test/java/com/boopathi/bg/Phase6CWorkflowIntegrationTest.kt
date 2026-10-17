@@ -56,6 +56,22 @@ class Phase6CWorkflowIntegrationTest {
         }
     }
 
+    private fun createMockToolRegistry(): com.boopathi.bg.service.tool.ToolRegistry {
+        val tool = object : com.boopathi.bg.service.tool.Tool {
+            override val name: String = "OPEN_APP"
+            override val description: String = "Mock Open App"
+            override val riskLevel: com.boopathi.bg.service.tool.RiskLevel = com.boopathi.bg.service.tool.RiskLevel.LOW
+            override suspend fun execute(parameters: Map<String, Any?>): com.boopathi.bg.service.tool.ToolResult {
+                return com.boopathi.bg.service.tool.ToolResult(
+                    com.boopathi.bg.service.tool.ToolStatus.SUCCESS,
+                    "Launched",
+                    "OPEN_APP"
+                )
+            }
+        }
+        return com.boopathi.bg.service.tool.ToolRegistry().apply { register(tool) }
+    }
+
     @Test
     fun testHandoff_verifiesForegroundAppCorrectly() = runBlocking {
         val bridge = TestBridge().apply { currentPkg = "com.android.settings" }
@@ -108,7 +124,7 @@ class Phase6CWorkflowIntegrationTest {
                 )
             )
         }
-        val appAgent = AppAgent(bridge = bridge)
+        val appAgent = AppAgent(bridge = bridge, toolRegistry = createMockToolRegistry())
         val executor = CrossAppWorkflowExecutor(
             appAgent = appAgent,
             handoffVerifier = CrossAppHandoffVerifier(bridge)
@@ -149,7 +165,7 @@ class Phase6CWorkflowIntegrationTest {
             // App opens, but foreground remains home screen
             currentPkg = "com.android.launcher"
         }
-        val appAgent = AppAgent(bridge = bridge)
+        val appAgent = AppAgent(bridge = bridge, toolRegistry = createMockToolRegistry())
         val executor = CrossAppWorkflowExecutor(
             appAgent = appAgent,
             handoffVerifier = CrossAppHandoffVerifier(bridge)
@@ -194,7 +210,7 @@ class Phase6CWorkflowIntegrationTest {
                 )
             )
         }
-        val appAgent = AppAgent(bridge = bridge)
+        val appAgent = AppAgent(bridge = bridge, toolRegistry = createMockToolRegistry())
         val executor = CrossAppWorkflowExecutor(
             appAgent = appAgent,
             handoffVerifier = CrossAppHandoffVerifier(bridge)
@@ -258,7 +274,7 @@ class Phase6CWorkflowIntegrationTest {
             override suspend fun verifyMessageSent(bridge: com.boopathi.bg.service.agent.AccessibilityBridge, expectedDraft: String, timeoutMs: Long): Boolean = false
         }
 
-        val appAgent = AppAgent(bridge = bridge, messagingAdapter = fakeAdapter)
+        val appAgent = AppAgent(bridge = bridge, toolRegistry = createMockToolRegistry(), messagingAdapter = fakeAdapter)
         val executor = CrossAppWorkflowExecutor(
             appAgent = appAgent,
             handoffVerifier = CrossAppHandoffVerifier(bridge),

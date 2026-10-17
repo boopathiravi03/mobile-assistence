@@ -42,17 +42,17 @@ fun AppAgentStatusBar(
     currentPackage: String,
     agentState: AppAgentState,
     lastResult: AppActionResult?,
+    onOpenSettingsClick: () -> Unit,
+    modifier: Modifier = Modifier,
     currentTask: AgentTask? = null,
     taskState: AgentTaskState = AgentTaskState.IDLE,
     currentWorkflow: com.boopathi.bg.service.workflow.CrossAppWorkflow? = null,
     workflowStatus: com.boopathi.bg.service.workflow.CrossAppWorkflowStatus = com.boopathi.bg.service.workflow.CrossAppWorkflowStatus.READY,
     workflowProgressMessage: String = "",
     notificationStatus: com.boopathi.bg.service.notification.NotificationAccessStatus = com.boopathi.bg.service.notification.NotificationAccessStatus.NOT_ENABLED,
-    onOpenSettingsClick: () -> Unit,
     onOpenNotificationSettingsClick: () -> Unit = {},
     onCancelTaskClick: () -> Unit = {},
-    onConfirmClick: () -> Unit = {},
-    modifier: Modifier = Modifier
+    onConfirmClick: () -> Unit = {}
 ) {
     val connectionColor = when {
         isAccessibilityConnected -> Color(0xFF00E676) // Neon Green Connected

@@ -1,6 +1,7 @@
 package com.boopathi.bg.service.notification
 
 import android.app.Notification
+import android.os.Build
 import android.os.Bundle
 import android.service.notification.StatusBarNotification
 
@@ -9,6 +10,7 @@ import android.service.notification.StatusBarNotification
  */
 object NotificationParser {
 
+    @Suppress("DEPRECATION")
     fun parse(sbn: StatusBarNotification): NotificationInfo? {
         val n = sbn.notification ?: return null
         val extras = n.extras ?: Bundle()
@@ -32,9 +34,14 @@ object NotificationParser {
 
         val category = n.category ?: ""
         val source = NotificationSource.fromPackage(pkg)
+        val hasMessagingPerson = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            extras.containsKey(Notification.EXTRA_MESSAGING_PERSON)
+        } else {
+            false
+        }
         val isMessaging = category == Notification.CATEGORY_MESSAGE ||
                 source != NotificationSource.UNKNOWN ||
-                extras.containsKey(Notification.EXTRA_MESSAGING_PERSON) ||
+                hasMessagingPerson ||
                 extras.containsKey(Notification.EXTRA_CONVERSATION_TITLE)
 
         val sourceType = when {
@@ -75,6 +82,7 @@ object NotificationParser {
         return NotificationPrivacyPolicy.sanitize(rawInfo, additionalText = allExtraText)
     }
 
+    @Suppress("DEPRECATION")
     private fun collectText(value: Any?, depth: Int = 0): List<String> {
         if (depth > 4) return emptyList()
         return when (value) {

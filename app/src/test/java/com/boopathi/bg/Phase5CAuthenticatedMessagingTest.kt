@@ -34,7 +34,9 @@ import com.boopathi.bg.service.security.AuthResultStatus
 import com.boopathi.bg.service.security.OwnerAuthGate
 import com.boopathi.bg.service.security.SimpleOwnerAuthGate
 import com.boopathi.bg.service.security.MessageDispatchAuthorization
+import com.boopathi.bg.service.tool.OpenAppTool
 import com.boopathi.bg.service.tool.RiskLevel
+import com.boopathi.bg.service.tool.ToolRegistry
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
 import org.junit.After
@@ -79,7 +81,16 @@ class Phase5CAuthenticatedMessagingTest {
         memoryManager = RoomMemoryManager(repository)
 
         bridge = FakeAccessibilityBridge(currentPkg = "com.whatsapp")
-        appAgent = AppAgent(bridge = bridge)
+        val mockOpenAppTool = object : com.boopathi.bg.service.tool.Tool {
+            override val name: String = "OPEN_APP"
+            override val description: String = "Mock launch"
+            override val riskLevel: RiskLevel = RiskLevel.LOW
+            override suspend fun execute(parameters: Map<String, Any?>): com.boopathi.bg.service.tool.ToolResult {
+                return com.boopathi.bg.service.tool.ToolResult(com.boopathi.bg.service.tool.ToolStatus.SUCCESS, "Launched", "OPEN_APP")
+            }
+        }
+        val toolRegistry = ToolRegistry().apply { register(mockOpenAppTool) }
+        appAgent = AppAgent(bridge = bridge, toolRegistry = toolRegistry)
         multiStepAgent = MultiStepAgent(appAgent = appAgent)
         authGate = SimpleOwnerAuthGate(mockStatus = AuthResultStatus.SUCCESS)
 

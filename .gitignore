@@ -13,3 +13,6 @@
 *.aab
 *.hprof
 *.png
+hs_err_pid*.log
+replay_pid*.log
+mobile-assistence/
