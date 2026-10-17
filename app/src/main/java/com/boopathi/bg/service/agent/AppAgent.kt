@@ -394,6 +394,10 @@ class AppAgent(
                     )
                 }
 
+                // Capture existing identical chat bubbles so an old message cannot
+                // satisfy post-send verification.
+                val previousMatchingMessages = adapter.exactMessageMatchCount(bridge, action.expectedMessage)
+
                 // 4. Controlled Send Action: Click send once
                 val sendClicked = bridge.click(sendButton)
                 if (!sendClicked) {
@@ -409,7 +413,11 @@ class AppAgent(
 
                 // 5. Post-send Verification
                 _state.value = AppAgentState.VERIFYING
-                val messageDelivered = adapter.verifyMessageSent(bridge, action.expectedMessage)
+                val messageDelivered = adapter.verifyMessageSent(
+                    bridge,
+                    action.expectedMessage,
+                    previousMatchCount = previousMatchingMessages
+                )
 
                 val (status, details) = if (messageDelivered) {
                     Pair(AppActionResultStatus.SUCCESS, "Message sent and verified in conversation view.")

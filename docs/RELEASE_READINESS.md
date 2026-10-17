@@ -115,3 +115,15 @@ Manifest review: cleartext traffic is disabled. The launcher Activity is exporte
 - Secret scans: 0 common secret pattern matches in tracked source, release APK, and AAB; generated release provider fields empty.
 - Devices: `adb devices -l` listed no devices/emulators; instrumentation and field checks not run.
 - Push: not performed.
+
+## Follow-up code review fixes (2026-10-17)
+
+After the Phase 12 candidate was pushed, a source review identified messaging verification, foreground recovery, notification redaction, and owner-persona issues. The following source changes and regression tests have since been applied:
+
+- Messaging now requires the exact WhatsApp package and exact normalized contact/draft matches. Phone recipients compare normalized digits. A send is only reported as verified when the input clears and the count of exact matching message bubbles increases; this confirms appearance in the chat UI, not recipient delivery or read status.
+- A changed foreground app now stops recovery and requires the user to return and explicitly resume.
+- Notification redaction inspects all text in notification extras, including expanded and nested message text, and recognizes short numeric codes when nearby wording identifies them as authentication codes. Unrelated numbers alone are not redacted.
+- The Gemini multimodal provider now requires an owner-profile provider and builds its persona from the current profile rather than a fixed name.
+- `testDebugUnitTest` passed after these changes: 222 tests, 0 failures, 0 errors. No physical device/emulator was available, and release APK/AAB files have not been rebuilt or signed from this follow-up source state.
+
+The code changes do not resolve the release blockers above: production signing credentials, real-device validation, an authenticated cloud backend, database encryption, and user-facing history deletion controls remain outstanding.

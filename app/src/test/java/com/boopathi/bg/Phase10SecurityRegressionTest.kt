@@ -100,6 +100,48 @@ class Phase10SecurityRegressionTest {
     }
 
     @Test
+    fun contextualVerificationCodeIsRedactedButUnrelatedNumberIsNot() {
+        val withCode = NotificationPrivacyPolicy.sanitize(
+            NotificationInfo(
+                notificationId = "n-code",
+                packageName = "example.app",
+                appLabel = "Example",
+                title = "Sign in",
+                text = "Your code: 492019"
+            )
+        )
+        val ordinaryNumber = NotificationPrivacyPolicy.sanitize(
+            NotificationInfo(
+                notificationId = "n-number",
+                packageName = "example.app",
+                appLabel = "Example",
+                title = "Delivery update",
+                text = "Your order 492019 is on the way"
+            )
+        )
+
+        assertTrue(withCode.isRedacted)
+        assertFalse(ordinaryNumber.isRedacted)
+    }
+
+    @Test
+    fun sensitiveExpandedNotificationTextTriggersRedaction() {
+        val sanitized = NotificationPrivacyPolicy.sanitize(
+            NotificationInfo(
+                notificationId = "n-expanded",
+                packageName = "example.app",
+                appLabel = "Example",
+                title = "Message",
+                text = "You have a new message"
+            ),
+            additionalText = "Your login code is 492019"
+        )
+
+        assertTrue(sanitized.isRedacted)
+        assertFalse(sanitized.text.contains("492019"))
+    }
+
+    @Test
     fun planValidatorRejectsCoordinateAndCommandParameters() = runBlocking {
         val coordinatePlan = plan(AgentPlanStep("s1", PlannedAction.TAP, target = "x=120,y=400"))
         assertFalse(AgentPlanValidator().validatePlan(coordinatePlan).isValid)

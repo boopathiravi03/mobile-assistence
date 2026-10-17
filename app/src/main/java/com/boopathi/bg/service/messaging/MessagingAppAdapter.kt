@@ -4,6 +4,7 @@ import android.util.Log
 import com.boopathi.bg.service.agent.AccessibilityBridge
 import com.boopathi.bg.service.agent.UiElementInfo
 import kotlinx.coroutines.delay
+import java.util.Locale
 
 /**
  * Interface defining messaging app automation operations.
@@ -16,6 +17,23 @@ interface MessagingAppAdapter {
     suspend fun verifyDraft(bridge: AccessibilityBridge, expectedDraft: String): Boolean
     suspend fun findSendButton(bridge: AccessibilityBridge): UiElementInfo?
     suspend fun verifyMessageSent(bridge: AccessibilityBridge, expectedDraft: String, timeoutMs: Long = 5000L): Boolean
+
+    suspend fun exactMessageMatchCount(bridge: AccessibilityBridge, expectedDraft: String): Int =
+        bridge.getVisibleElements().count { element ->
+            !element.isEditable && listOf(element.text, element.contentDescription)
+                .any { normalizeDraft(it) == normalizeDraft(expectedDraft) }
+        }
+
+    suspend fun verifyMessageSent(
+        bridge: AccessibilityBridge,
+        expectedDraft: String,
+        previousMatchCount: Int,
+        timeoutMs: Long = 5000L
+    ): Boolean = verifyMessageSent(bridge, expectedDraft, timeoutMs)
+
+    fun normalizeDraft(value: String): String = value.replace("\r\n", "\n")
+        .trim()
+        .replace(Regex("[ \\t]+"), " ")
 }
 
 /**
@@ -31,7 +49,7 @@ open class WhatsAppMessagingAdapter : MessagingAppAdapter {
 
     open override suspend fun verifyRecipient(bridge: AccessibilityBridge, expectedRecipient: String): Boolean {
         val currentPkg = bridge.getCurrentPackage()
-        if (!currentPkg.contains("whatsapp", ignoreCase = true)) {
+        if (currentPkg != supportedPackage) {
             Log.w(TAG, "Foreground package mismatch: $currentPkg")
             return false
         }
@@ -44,24 +62,32 @@ open class WhatsAppMessagingAdapter : MessagingAppAdapter {
             it.bounds.isEmpty || it.bounds.bottom <= 800
         }
 
-        val recipientMatches = candidateElements.any {
-            val textMatch = it.text.contains(expectedRecipient, ignoreCase = true)
-            val descMatch = it.contentDescription.contains(expectedRecipient, ignoreCase = true)
-            textMatch || descMatch
+        val expected = normalizeRecipient(expectedRecipient)
+        if (expected.isBlank()) return false
+        val expectedDigits = expectedRecipient.filter(Char::isDigit)
+        val expectedIsPhone = expectedDigits.length >= 7 && expectedRecipient.all { it.isDigit() || it in "+-(). /" }
+
+        val recipientMatches = candidateElements.any { element ->
+            listOf(element.text, element.contentDescription).any { rawCandidate ->
+                if (expectedIsPhone) {
+                    val candidateDigits = rawCandidate.filter(Char::isDigit)
+                    candidateDigits.isNotEmpty() && candidateDigits == expectedDigits
+                } else {
+                    normalizeRecipient(rawCandidate) == expected
+                }
+            }
         }
 
         return recipientMatches
     }
 
     override suspend fun verifyDraft(bridge: AccessibilityBridge, expectedDraft: String): Boolean {
+        val expected = normalizeDraft(expectedDraft)
+        if (expected.isBlank()) return false
         val elements = bridge.getVisibleElements()
         val editable = elements.filter { it.isEditable }
 
-        return editable.any {
-            val fieldText = it.text.trim()
-            val expected = expectedDraft.trim()
-            fieldText.equals(expected, ignoreCase = true) || fieldText.contains(expected, ignoreCase = true)
-        }
+        return editable.any { normalizeDraft(it.text) == expected }
     }
 
     override suspend fun findSendButton(bridge: AccessibilityBridge): UiElementInfo? {
@@ -99,7 +125,16 @@ open class WhatsAppMessagingAdapter : MessagingAppAdapter {
         bridge: AccessibilityBridge,
         expectedDraft: String,
         timeoutMs: Long
+    ): Boolean = verifyMessageSent(bridge, expectedDraft, Int.MAX_VALUE, timeoutMs)
+
+    override suspend fun verifyMessageSent(
+        bridge: AccessibilityBridge,
+        expectedDraft: String,
+        previousMatchCount: Int,
+        timeoutMs: Long
     ): Boolean {
+        val expected = normalizeDraft(expectedDraft)
+        if (expected.isBlank()) return false
         val startTime = System.currentTimeMillis()
 
         while (System.currentTimeMillis() - startTime < timeoutMs) {
@@ -115,18 +150,10 @@ open class WhatsAppMessagingAdapter : MessagingAppAdapter {
             }
 
             // Signal 2: The message text appears in the conversation history as an outgoing message bubble
-            val messageInChat = elements.any {
-                !it.isEditable && it.text.contains(expectedDraft, ignoreCase = true)
-            }
+            val currentMatchCount = exactMessageMatchCount(bridge, expected)
 
-            if (inputCleared && messageInChat) {
-                Log.i(TAG, "Message verified: input cleared and message bubble found.")
-                return true
-            }
-
-            // Or if either strong signal is detected
-            if (inputCleared || messageInChat) {
-                Log.i(TAG, "Message verified by single signal (inputCleared=$inputCleared, messageInChat=$messageInChat)")
+            if (inputCleared && currentMatchCount > previousMatchCount) {
+                Log.i(TAG, "Message verified: input cleared and a new exact message bubble appeared.")
                 return true
             }
         }
@@ -134,5 +161,9 @@ open class WhatsAppMessagingAdapter : MessagingAppAdapter {
         Log.w(TAG, "Post-send verification timed out after ${timeoutMs}ms.")
         return false
     }
+
+    private fun normalizeRecipient(value: String): String = value.trim()
+        .replace(Regex("\\s+"), " ")
+        .lowercase(Locale.ROOT)
 }
 

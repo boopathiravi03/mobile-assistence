@@ -30,21 +30,32 @@ object NotificationPrivacyPolicy {
     )
 
     private val OTP_PATTERN = Regex("\\b\\d{4,8}\\b")
+    private val CODE_CONTEXT_PATTERN = Regex(
+        "(?i)\\b(?:otp|code|passcode|verification|authentication|login|sign[ -]?in|security|confirm)\\b"
+    )
 
     /**
      * Determines whether the notification text or title contains sensitive authentication or financial information.
      */
     fun isSensitive(title: String, text: String): Boolean {
         val combined = "$title $text".lowercase()
-        return SENSITIVE_KEYWORDS.any { keyword -> combined.contains(keyword) }
+        if (SENSITIVE_KEYWORDS.any { keyword -> combined.contains(keyword) }) return true
+
+        // Redact short numeric codes when nearby wording makes their purpose clear.
+        // This deliberately avoids treating every 4-8 digit number as a secret.
+        return OTP_PATTERN.findAll(combined).any { match ->
+            val contextStart = (match.range.first - 40).coerceAtLeast(0)
+            val contextEnd = (match.range.last + 33).coerceAtMost(combined.length)
+            CODE_CONTEXT_PATTERN.containsMatchIn(combined.substring(contextStart, contextEnd))
+        }
     }
 
     /**
      * Sanitizes a NotificationInfo. If sensitive content is detected, the sensitive text
      * is redacted and replaced with a privacy-safe placeholder.
      */
-    fun sanitize(info: NotificationInfo): NotificationInfo {
-        if (isSensitive(info.title, info.text)) {
+    fun sanitize(info: NotificationInfo, additionalText: String = ""): NotificationInfo {
+        if (isSensitive(info.title, "${info.text} $additionalText")) {
             return info.copy(
                 title = "Sensitive notification",
                 text = "Sensitive authentication/transaction details hidden for privacy.",

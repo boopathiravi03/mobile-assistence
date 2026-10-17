@@ -283,6 +283,13 @@ class Phase5CAuthenticatedMessagingTest {
             override suspend fun verifyMessageSent(bridge: com.boopathi.bg.service.agent.AccessibilityBridge, expectedDraft: String, timeoutMs: Long): Boolean {
                 return true
             }
+
+            override suspend fun verifyMessageSent(
+                bridge: com.boopathi.bg.service.agent.AccessibilityBridge,
+                expectedDraft: String,
+                previousMatchCount: Int,
+                timeoutMs: Long
+            ): Boolean = true
         }
 
         val testAgent = AppAgent(bridge = bridge, messagingAdapter = testAdapter)

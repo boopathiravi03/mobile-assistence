@@ -3,6 +3,7 @@ package com.boopathi.bg.service.multimodal
 import android.util.Base64
 import android.util.Log
 import com.boopathi.bg.BuildConfig
+import com.boopathi.bg.data.model.OwnerProfile
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
@@ -17,6 +18,7 @@ import java.util.concurrent.TimeUnit
  * Multimodal perception implementation using Google Gemini REST API.
  */
 class GeminiMultimodalProvider(
+    private val ownerProfileProvider: () -> OwnerProfile,
     private val apiKey: String = BuildConfig.GEMINI_API_KEY,
     private val preferredModel: String = "gemini-2.5-flash",
     private val client: OkHttpClient = OkHttpClient.Builder()
@@ -32,8 +34,8 @@ class GeminiMultimodalProvider(
     companion object {
         private const val TAG = "GeminiMultimodal"
 
-        private const val MULTIMODAL_SYSTEM_PERSONA =
-            "You are BG, the personal AI mobile assistant for Boopathi.\n" +
+        private fun multimodalSystemPersona(ownerName: String) =
+            "You are BG, the personal AI mobile assistant for $ownerName.\n" +
             "Your role here is Multimodal Perception & Visual Understanding.\n\n" +
             "Core Guidelines:\n" +
             "1. Concise & Spoken-Friendly: Provide clear, spoken-friendly summaries (1-3 sentences) suitable for Android TTS. " +
@@ -110,10 +112,12 @@ class GeminiMultimodalProvider(
     ): String? {
         val url = "https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent?key=$apiKey"
 
+        val ownerName = ownerProfileProvider().name.trim().ifBlank { "User" }
+        val basePersona = multimodalSystemPersona(ownerName)
         val effectiveSystem = if (!taskContext.isNullOrBlank()) {
-            "$MULTIMODAL_SYSTEM_PERSONA\nCurrent task context: $taskContext"
+            "$basePersona\nCurrent task context: $taskContext"
         } else {
-            MULTIMODAL_SYSTEM_PERSONA
+            basePersona
         }
 
         val payload = JSONObject().apply {

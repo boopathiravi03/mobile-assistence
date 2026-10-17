@@ -129,7 +129,7 @@ class Phase6BRecoveryPlannerTest {
     }
 
     @Test
-    fun testWrongForegroundAppRelaunchesExpectedApp() = runBlocking {
+    fun testWrongForegroundAppAbortsAndRequiresExplicitResume() = runBlocking {
         val step = AgentStep(action = AppAction.Tap("Send"), description = "Tap Send")
         val mismatch = UiMismatch(
             type = UiMismatchType.WRONG_FOREGROUND_APP,
@@ -146,11 +146,9 @@ class Phase6BRecoveryPlannerTest {
             recoveryStartTimeMs = System.currentTimeMillis()
         )
 
-        assertTrue(proposal.isExecutable)
-        assertEquals(2, proposal.recoverySteps.size)
-        assertTrue(proposal.recoverySteps[0].action is AppAction.OpenApp)
-        assertEquals("com.whatsapp", (proposal.recoverySteps[0].action as AppAction.OpenApp).appName)
-        assertTrue(proposal.recoverySteps[1].action is AppAction.WaitForWindow)
+        assertFalse(proposal.isExecutable)
+        assertTrue(proposal.recoverySteps.isEmpty())
+        assertTrue(proposal.explanation.contains("explicitly resume"))
     }
 
     @Test

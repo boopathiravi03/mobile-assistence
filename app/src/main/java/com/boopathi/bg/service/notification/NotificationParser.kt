@@ -15,9 +15,16 @@ object NotificationParser {
 
         val pkg = sbn.packageName ?: ""
         val title = extras.getCharSequence(Notification.EXTRA_TITLE)?.toString()?.trim() ?: ""
-        val text = extras.getCharSequence(Notification.EXTRA_TEXT)?.toString()?.trim()
-            ?: extras.getCharSequence(Notification.EXTRA_BIG_TEXT)?.toString()?.trim()
-            ?: ""
+        val shortText = extras.getCharSequence(Notification.EXTRA_TEXT)?.toString()?.trim().orEmpty()
+        val expandedText = extras.getCharSequence(Notification.EXTRA_BIG_TEXT)?.toString()?.trim().orEmpty()
+        val textLines = extras.getCharSequenceArray(Notification.EXTRA_TEXT_LINES)
+            ?.map(CharSequence::toString)
+            ?.filter(String::isNotBlank)
+            .orEmpty()
+        val text = shortText.ifBlank { expandedText.ifBlank { textLines.joinToString("\n") } }
+        val allExtraText = extras.keySet()
+            .flatMap { key -> collectText(extras.get(key)) }
+            .joinToString("\n")
 
         if (title.isEmpty() && text.isEmpty()) {
             return null
@@ -65,7 +72,18 @@ object NotificationParser {
             senderName = senderName
         )
 
-        return NotificationPrivacyPolicy.sanitize(rawInfo)
+        return NotificationPrivacyPolicy.sanitize(rawInfo, additionalText = allExtraText)
+    }
+
+    private fun collectText(value: Any?, depth: Int = 0): List<String> {
+        if (depth > 4) return emptyList()
+        return when (value) {
+            is CharSequence -> listOf(value.toString())
+            is Bundle -> value.keySet().flatMap { key -> collectText(value.get(key), depth + 1) }
+            is Array<*> -> value.flatMap { item -> collectText(item, depth + 1) }
+            is Iterable<*> -> value.flatMap { item -> collectText(item, depth + 1) }
+            else -> emptyList()
+        }
     }
 
     /**

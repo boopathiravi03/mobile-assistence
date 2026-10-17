@@ -198,32 +198,10 @@ Rules:
             }
 
             UiMismatchType.WRONG_FOREGROUND_APP -> {
-                // Active app does not match expected app. Attempt to reopen expected app if known
-                val expectedPkg = mismatch.expectedPackage
-                if (!expectedPkg.isNullOrBlank()) {
-                    val steps = listOf(
-                        AgentStep(
-                            action = AppAction.OpenApp(expectedPkg),
-                            description = "Re-open $expectedPkg",
-                            maxRetries = 0
-                        ),
-                        AgentStep(
-                            action = AppAction.WaitForWindow(expectedPkg, timeoutMs = 4000L),
-                            description = "Wait for $expectedPkg to foreground",
-                            maxRetries = 0
-                        )
-                    )
-                    RecoveryProposal(
-                        mismatchType = mismatch.type,
-                        recoverySteps = steps,
-                        explanation = "Wrong application foregrounded. Relaunching expected package '$expectedPkg'."
-                    )
-                } else {
-                    RecoveryProposal.abort(
-                        mismatchType = mismatch.type,
-                        reason = "Foreground app '${mismatch.actualPackage}' is not expected."
-                    )
-                }
+                RecoveryProposal.abort(
+                    mismatchType = mismatch.type,
+                    reason = "The foreground app changed to '${mismatch.actualPackage}'. BG expected '${mismatch.expectedPackage}'. Return to the expected app and explicitly resume if you want to continue."
+                )
             }
 
             UiMismatchType.OBSERVATION_UNAVAILABLE -> {

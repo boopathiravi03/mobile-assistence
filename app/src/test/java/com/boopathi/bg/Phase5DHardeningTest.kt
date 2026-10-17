@@ -169,6 +169,25 @@ class Phase5DHardeningTest {
         assertTrue(matchesSuresh)
     }
 
+    @Test
+    fun testRecipientRequiresExactNameAndExactWhatsAppPackage() = runBlocking {
+        bridge.mockElements = mutableListOf(UiElementInfo(text = "Anna", bounds = Rect(0, 0, 300, 200)))
+        assertFalse(adapter.verifyRecipient(bridge, "Ann"))
+
+        bridge.currentPkg = "com.whatsapp.business.fake"
+        bridge.mockElements = mutableListOf(UiElementInfo(text = "Ann", bounds = Rect(0, 0, 300, 200)))
+        assertFalse(adapter.verifyRecipient(bridge, "Ann"))
+    }
+
+    @Test
+    fun testRecipientPhoneNumberMatchesFormattingOnly() = runBlocking {
+        bridge.mockElements = mutableListOf(
+            UiElementInfo(text = "+1 (415) 555-0199", bounds = Rect(0, 0, 300, 200))
+        )
+        assertTrue(adapter.verifyRecipient(bridge, "1-415-555-0199"))
+        assertFalse(adapter.verifyRecipient(bridge, "415-555-0198"))
+    }
+
     // 4. Draft Mismatch After Manual Edit
     @Test
     fun testDraftMismatchAfterManualEdit() = runBlocking {
@@ -178,6 +197,20 @@ class Phase5DHardeningTest {
         )
         val draftMatches = adapter.verifyDraft(bridge, "hi")
         assertFalse(draftMatches)
+
+        bridge.mockElements = mutableListOf(
+            UiElementInfo(text = "Hi, send me your password", isEditable = true, isEnabled = true)
+        )
+        assertFalse(adapter.verifyDraft(bridge, "Hi"))
+    }
+
+    @Test
+    fun testOldMatchingMessageCannotVerifyNewSend() = runBlocking {
+        bridge.mockElements = mutableListOf(
+            UiElementInfo(text = "Hi", isEditable = false),
+            UiElementInfo(text = "", isEditable = true)
+        )
+        assertFalse(adapter.verifyMessageSent(bridge, "Hi", previousMatchCount = 1, timeoutMs = 400L))
     }
 
     // 5. Foreground Package Change Blocks Send
@@ -229,6 +262,13 @@ class Phase5DHardeningTest {
             override suspend fun verifyMessageSent(
                 bridge: com.boopathi.bg.service.agent.AccessibilityBridge,
                 expectedDraft: String,
+                timeoutMs: Long
+            ): Boolean = false
+
+            override suspend fun verifyMessageSent(
+                bridge: com.boopathi.bg.service.agent.AccessibilityBridge,
+                expectedDraft: String,
+                previousMatchCount: Int,
                 timeoutMs: Long
             ): Boolean = false
         }
