@@ -15,6 +15,7 @@ object NotificationPrivacyPolicy {
         "onetime password",
         "password",
         "pin",
+        "passcode",
         "cvv",
         "bank",
         "upi",
@@ -29,17 +30,22 @@ object NotificationPrivacyPolicy {
         "mfa"
     )
 
+    private val SENSITIVE_KEYWORD_PATTERNS = SENSITIVE_KEYWORDS.map { keyword ->
+        Regex("(?i)(?<![\\p{L}\\p{N}])${Regex.escape(keyword)}(?![\\p{L}\\p{N}])")
+    }
+
     private val OTP_PATTERN = Regex("\\b\\d{4,8}\\b")
     private val CODE_CONTEXT_PATTERN = Regex(
-        "(?i)\\b(?:otp|code|passcode|verification|authentication|login|sign[ -]?in|security|confirm)\\b"
+        "(?i)\\b(?:otp|code|passcode|verification|authentication|" +
+            "login|sign[ -]?in|security|confirm)\\b"
     )
 
     /**
      * Determines whether the notification text or title contains sensitive authentication or financial information.
      */
     fun isSensitive(title: String, text: String): Boolean {
-        val combined = "$title $text".lowercase()
-        if (SENSITIVE_KEYWORDS.any { keyword -> combined.contains(keyword) }) return true
+        val combined = "$title $text"
+        if (SENSITIVE_KEYWORD_PATTERNS.any { it.containsMatchIn(combined) }) return true
 
         // Redact short numeric codes when nearby wording makes their purpose clear.
         // This deliberately avoids treating every 4-8 digit number as a secret.

@@ -127,3 +127,11 @@ After the Phase 12 candidate was pushed, a source review identified messaging ve
 - `testDebugUnitTest` passed after these changes: 222 tests, 0 failures, 0 errors. No physical device/emulator was available, and release APK/AAB files have not been rebuilt or signed from this follow-up source state.
 
 The code changes do not resolve the release blockers above: production signing credentials, real-device validation, an authenticated cloud backend, database encryption, and user-facing history deletion controls remain outstanding.
+
+## Additional privacy and accessibility hardening (2026-10-17)
+
+- Notification sensitive terms and messaging safety phrases now use whole-word/whole-phrase matching, preventing ordinary words such as “shopping” and “shipping” from matching `pin`.
+- Message safety rejects blank and oversized text, credential values, sensitive phrases, and numeric money-transfer instructions. Regression coverage includes harmless wording, credentials, and transfer examples.
+- Accessibility clicks and text entry now reject targets from a different foreground package. Target lookup requires one exact match across text, content description, or view ID and aborts when the match is missing or ambiguous.
+- Validation: `testDebugUnitTest` passed (232 tests, 0 failures/errors); `assembleDebug` passed; `:app:compileDebugAndroidTestKotlin` passed.
+- `adb devices -l` returned no connected devices, so the Phase 3 and Phase 11 instrumentation tests could not be run on a device. The debug APK was rebuilt; the unsigned release APK/AAB were not rebuilt or signed.

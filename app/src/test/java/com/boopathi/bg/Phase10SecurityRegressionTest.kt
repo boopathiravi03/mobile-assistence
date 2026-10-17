@@ -125,6 +125,17 @@ class Phase10SecurityRegressionTest {
     }
 
     @Test
+    fun ordinaryWordsContainingPinAreNotSensitive() {
+        assertFalse(NotificationPrivacyPolicy.isSensitive("", "I am going shopping"))
+        assertFalse(NotificationPrivacyPolicy.isSensitive("", "The shipping update arrived"))
+    }
+
+    @Test
+    fun standalonePinIsSensitive() {
+        assertTrue(NotificationPrivacyPolicy.isSensitive("", "Your PIN is required"))
+    }
+
+    @Test
     fun sensitiveExpandedNotificationTextTriggersRedaction() {
         val sanitized = NotificationPrivacyPolicy.sanitize(
             NotificationInfo(

@@ -59,10 +59,10 @@ object MessagingPolicy {
      * Returns true if the message is safe to send, false if blocked.
      */
     fun isContentSafeToSend(text: String): Boolean {
-        val lower = text.lowercase().trim()
+        val normalized = text.lowercase().trim()
+        if (normalized.isBlank() || normalized.length > MAX_MESSAGE_LENGTH) return false
 
-        // Conservative pattern detection for security/financial values
-        val sensitiveKeywords = listOf(
+        val sensitivePhrases = listOf(
             "otp",
             "one-time password",
             "verification code",
@@ -72,30 +72,26 @@ object MessagingPolicy {
             "card number",
             "bank account",
             "upi pin",
-            "transfer ₹",
-            "transfer rs",
-            "send money",
-            "send ₹",
-            "send rs",
             "security code",
-            "authentication code"
+            "authentication code",
+            "send money"
         )
-
-        if (sensitiveKeywords.any { lower.contains(it) }) {
-            return false
+        val phraseDetected = sensitivePhrases.any { phrase ->
+            Regex("(?i)(?<![\\p{L}\\p{N}])${Regex.escape(phrase)}(?![\\p{L}\\p{N}])")
+                .containsMatchIn(normalized)
         }
+        if (phraseDetected) return false
 
-        // Check for raw OTP / PIN patterns like "my pin is 1234" or "otp is 123456"
-        val otpWithContext = Regex("(?:otp|pin|code|password)\\s*(?:is|:)?\\s*\\d{4,8}", RegexOption.IGNORE_CASE)
-        if (otpWithContext.containsMatchIn(lower)) {
-            return false
-        }
+        val credentialWithValue = Regex(
+            "(?i)\\b(?:otp|pin|code|password|passcode)\\b\\s*(?:is|:|=)?\\s*\\d{4,8}\\b"
+        )
+        if (credentialWithValue.containsMatchIn(normalized)) return false
 
-        // Check for financial transfer instruction: "transfer 500" or "send 500 rupees"
-        val moneyTransferPattern = Regex("(?:transfer|send)\\s+(?:\\$?|₹?|rs\\.?\\s*)?\\d+\\s*(?:rupees|inr|usd|bucks)?\\s+to", RegexOption.IGNORE_CASE)
-        if (moneyTransferPattern.containsMatchIn(lower)) {
-            return false
-        }
+        val moneyTransferPattern = Regex(
+            "(?i)\\b(?:transfer|send)\\s+(?:\\$|₹|rs\\.?\\s*)?\\d+\\s*" +
+                "(?:rupees|inr|usd|bucks)?\\s+to\\b"
+        )
+        if (moneyTransferPattern.containsMatchIn(normalized)) return false
 
         return true
     }

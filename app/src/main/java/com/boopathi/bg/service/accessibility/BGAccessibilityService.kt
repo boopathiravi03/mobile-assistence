@@ -140,6 +140,11 @@ class BGAccessibilityService : AccessibilityService() {
 
     fun click(element: UiElementInfo): Boolean {
         val root = rootInActiveWindow ?: return false
+        val activePackage = root.packageName?.toString().orEmpty()
+        if (element.packageName.isNotBlank() && activePackage != element.packageName) {
+            Log.w(TAG, "Click rejected: UI target belongs to a different package.")
+            return false
+        }
         val node = findMatchingNode(root, element) ?: return false
 
         // 1. Try clicking the node directly if clickable
@@ -163,6 +168,11 @@ class BGAccessibilityService : AccessibilityService() {
 
     fun typeText(element: UiElementInfo, text: String): Boolean {
         val root = rootInActiveWindow ?: return false
+        val activePackage = root.packageName?.toString().orEmpty()
+        if (element.packageName.isNotBlank() && activePackage != element.packageName) {
+            Log.w(TAG, "Text entry rejected: UI target belongs to a different package.")
+            return false
+        }
         val node = findMatchingNode(root, element) ?: return false
 
         if (!node.isEditable || !node.isEnabled) {
@@ -200,26 +210,41 @@ class BGAccessibilityService : AccessibilityService() {
     }
 
     private fun findMatchingNode(root: AccessibilityNodeInfo, target: UiElementInfo): AccessibilityNodeInfo? {
-        // Compare attributes
-        val nodeText = root.text?.toString() ?: ""
-        val nodeDesc = root.contentDescription?.toString() ?: ""
-        val nodeViewId = root.viewIdResourceName ?: ""
-
-        val textMatches = target.text.isNotBlank() && (nodeText.equals(target.text, ignoreCase = true) || nodeText.contains(target.text, ignoreCase = true))
-        val descMatches = target.contentDescription.isNotBlank() && (nodeDesc.equals(target.contentDescription, ignoreCase = true) || nodeDesc.contains(target.contentDescription, ignoreCase = true))
-        val idMatches = target.viewId.isNotBlank() && nodeViewId.equals(target.viewId, ignoreCase = true)
-
-        if (textMatches || descMatches || idMatches) {
-            return root
+        if (target.text.isBlank() && target.contentDescription.isBlank() && target.viewId.isBlank()) {
+            return null
         }
 
-        for (i in 0 until root.childCount) {
-            val child = root.getChild(i) ?: continue
-            val match = findMatchingNode(child, target)
-            if (match != null) return match
+        val matches = mutableListOf<AccessibilityNodeInfo>()
+        collectExactMatches(root, target, matches)
+        return matches.singleOrNull()
+    }
+
+    private fun collectExactMatches(
+        node: AccessibilityNodeInfo,
+        target: UiElementInfo,
+        matches: MutableList<AccessibilityNodeInfo>
+    ) {
+        if (matches.size > 1) return
+
+        val nodeText = node.text?.toString().orEmpty()
+        val nodeDescription = node.contentDescription?.toString().orEmpty()
+        val nodeViewId = node.viewIdResourceName.orEmpty()
+
+        val exactTextMatch = target.text.isNotBlank() && nodeText.equals(target.text, ignoreCase = true)
+        val exactDescriptionMatch = target.contentDescription.isNotBlank() &&
+            nodeDescription.equals(target.contentDescription, ignoreCase = true)
+        val exactViewIdMatch = target.viewId.isNotBlank() && nodeViewId.equals(target.viewId, ignoreCase = true)
+
+        if (exactTextMatch || exactDescriptionMatch || exactViewIdMatch) {
+            matches.add(node)
+            if (matches.size > 1) return
         }
 
-        return null
+        for (index in 0 until node.childCount) {
+            val child = node.getChild(index) ?: continue
+            collectExactMatches(child, target, matches)
+            if (matches.size > 1) return
+        }
     }
 
     fun pressBack(): Boolean {

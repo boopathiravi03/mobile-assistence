@@ -153,6 +153,21 @@ class Phase5CAuthenticatedMessagingTest {
         assertTrue(safe2)
     }
 
+    @Test
+    fun harmlessWordsContainingCredentialFragmentsAreAllowed() {
+        assertTrue(MessagingPolicy.isContentSafeToSend("I am going shopping; the shipping update arrived."))
+        assertTrue(MessagingPolicy.isContentSafeToSend("See you in 10 minutes."))
+    }
+
+    @Test
+    fun credentialAndFinancialMessagesAreBlocked() {
+        assertFalse(MessagingPolicy.isContentSafeToSend("Your password is secret"))
+        assertFalse(MessagingPolicy.isContentSafeToSend("PIN is 4829"))
+        assertFalse(MessagingPolicy.isContentSafeToSend("Send 500 rupees to Karthi"))
+        assertFalse(MessagingPolicy.isContentSafeToSend(""))
+        assertFalse(MessagingPolicy.isContentSafeToSend("x".repeat(MessagingPolicy.MAX_MESSAGE_LENGTH + 1)))
+    }
+
     // 6. Authentication: Success
     @Test
     fun testAuthenticationSuccess() = runBlocking {
